@@ -1,0 +1,81 @@
+# HG changeset patch
+# User shelve@localhost
+# Date 1532115375 14400
+#      Fri Jul 20 15:36:15 2018 -0400
+# Branch parameter_rebuildGroup
+# Node ID 794d7f02a3dd9d82ed19fab6736ae8af446b9508
+# Parent  fb7f869dd6da93538afe57f1291a0d39965939ab
+changes to: small bug fix
+
+diff --git a/ObjectListView/ObjectListView.py b/ObjectListView/ObjectListView.py
+--- a/ObjectListView/ObjectListView.py
++++ b/ObjectListView/ObjectListView.py
+@@ -1786,7 +1786,7 @@
+             self.stEmptyListMsg.SetDimensions(0, sz.GetHeight() / 3,
+                                               sz.GetWidth(),
+                                               sz.GetHeight())
+-        # self.stEmptyListMsg.Wrap(sz.GetWidth())
++        self.stEmptyListMsg.Wrap(sz.GetWidth())
+ 
+     def _HandleTabKey(self, isShiftDown):
+         """
+@@ -2765,6 +2765,7 @@
+             If this is True (the default) Groups will be rebuilt if the user clicks a column.
+         """
+         self.groups = list()
++        self.emptyGroups = list()
+         self.showGroups = True
+         self.putBlankLineBetweenGroups = True
+         self.alwaysGroupByColumnIndex = -1
+@@ -2958,6 +2959,13 @@
+         self.SetShowGroups(True)
+         self._SetGroups(groups)
+ 
++    def SetEmptyGroups(self, keyList):
++        """Makes empty groups with the provided keys.
++        If a group with that key already exists, it does not add an empty group.
++        Use this to ensure groups are shown, even if there are no items for that group.
++        """
++        self.emptyGroups = keyList or list()
++
+     def SetObjects(self, modelObjects, preserveSelection=False):
+         """
+         Set the list of modelObjects to be displayed by the control.
+@@ -3013,6 +3021,13 @@
+                     groupingColumn.GetGroupKeyAsString(key))
+             group.Add(model)
+ 
++        for key in self.emptyGroups:
++            group = groupMap.get(key)
++            if group is None:
++                groupMap[key] = group = ListEmptyGroup(
++                    key,
++                    groupingColumn.GetGroupKeyAsString(key))
++
+         groups = groupMap.values()
+ 
+         if self.GetShowItemCounts():
+@@ -3256,7 +3271,9 @@
+         item = self.GetNextItem(-1, wx.LIST_NEXT_ALL, wx.LIST_STATE_DONTCARE)
+         while (item != -1):
+             model = self.innerList[item]
+-            if ((isinstance(model, ListGroup)) and (modelObject in model.modelObjects)):
++            if ((isinstance(model, ListGroup)      and (modelObject in model.modelObjects)) or 
++                (isinstance(model, ListEmptyGroup) and (modelObject == model.key))):
++
+                 realIndex = self._MapModelIndexToListIndex(item)
+                 self.SetItemState(realIndex, wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
+ 
+@@ -3500,6 +3517,12 @@
+         """
+         self.modelObjects.append(model)
+ 
++class ListEmptyGroup(ListGroup):
++    """A list group that is empty."""
++
++    def __init__(self, *args, **kwargs):
++        super().__init__(*args, **kwargs)
++
+ 
+ #######################################################################
+ 

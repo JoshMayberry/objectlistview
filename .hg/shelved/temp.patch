@@ -1,0 +1,207 @@
+# HG changeset patch
+# User shelve@localhost
+# Date 1532115249 14400
+#      Fri Jul 20 15:34:09 2018 -0400
+# Branch parameter_rebuildGroup
+# Node ID 845caa9b9054b00b1fa269a62d45f2cc4b208e44
+# Parent  fb7f869dd6da93538afe57f1291a0d39965939ab
+changes to: small bug fix
+
+diff --git a/ObjectListView/ObjectListView.py b/ObjectListView/ObjectListView.py
+--- a/ObjectListView/ObjectListView.py
++++ b/ObjectListView/ObjectListView.py
+@@ -917,6 +917,19 @@
+         Change the width of space filling columns so that they fill the
+         unoccupied width of the listview
+         """
++
++        #An empty group should not be selected while resizing columns
++        # deselectedList = []
++        # item = self.GetNextItem(-1, wx.LIST_NEXT_ALL, wx.LIST_STATE_DONTCARE)
++        # while (item != -1):
++        #     model = self.innerList[item]
++        #     if (isinstance(model, ListEmptyGroup)):
++        #         model.modelObjects = [type("TempItem", (object,), {})()]
++        #         deselectedList.append(model)
++        #     item = self.GetNextItem(item, wx.LIST_NEXT_ALL, wx.LIST_STATE_DONTCARE)
++
++        # print("@2", deselectedList)
++
+         # If the list isn't in report view or there are no space filling
+         # columns, just return
+         if not self.InReportView():
+@@ -966,9 +979,15 @@
+         for (i, col) in columnsToResize:
+             newWidth = freeSpace * col.freeSpaceProportion / totalProportion
+             boundedWidth = col.CalcBoundedWidth(newWidth)
++
++            # print("@7.2", i, newWidth, boundedWidth, self.GetColumnWidth(i))
++
+             if self.GetColumnWidth(i) != boundedWidth:
+                 self.SetColumnWidth(i, boundedWidth)
+ 
++        # for item in deselectedList:
++        #     item.modelObjects = list()
++
+     def SetCheckState(self, modelObject, state):
+         """
+         Set the check state of the given model object.
+@@ -1786,7 +1805,7 @@
+             self.stEmptyListMsg.SetDimensions(0, sz.GetHeight() / 3,
+                                               sz.GetWidth(),
+                                               sz.GetHeight())
+-        # self.stEmptyListMsg.Wrap(sz.GetWidth())
++        self.stEmptyListMsg.Wrap(sz.GetWidth())
+ 
+     def _HandleTabKey(self, isShiftDown):
+         """
+@@ -2765,6 +2784,7 @@
+             If this is True (the default) Groups will be rebuilt if the user clicks a column.
+         """
+         self.groups = list()
++        self.emptyGroups = list()
+         self.showGroups = True
+         self.putBlankLineBetweenGroups = True
+         self.alwaysGroupByColumnIndex = -1
+@@ -2958,6 +2978,13 @@
+         self.SetShowGroups(True)
+         self._SetGroups(groups)
+ 
++    def SetEmptyGroups(self, keyList):
++        """Makes empty groups with the provided keys.
++        If a group with that key already exists, it does not add an empty group.
++        Use this to ensure groups are shown, even if there are no items for that group.
++        """
++        self.emptyGroups = keyList or list()
++
+     def SetObjects(self, modelObjects, preserveSelection=False):
+         """
+         Set the list of modelObjects to be displayed by the control.
+@@ -3013,6 +3040,13 @@
+                     groupingColumn.GetGroupKeyAsString(key))
+             group.Add(model)
+ 
++        for key in self.emptyGroups:
++            group = groupMap.get(key)
++            if group is None:
++                groupMap[key] = group = ListEmptyGroup(
++                    key,
++                    groupingColumn.GetGroupKeyAsString(key))
++
+         groups = groupMap.values()
+ 
+         if self.GetShowItemCounts():
+@@ -3073,10 +3107,13 @@
+             return ""
+ 
+         if isinstance(modelObject, ListGroup):
+-            if self.GetPrimaryColumnIndex() == colIdx:
++            if (isinstance(modelObject, ListEmptyGroup)):
+                 return modelObject.title
+             else:
+-                return ""
++                if self.GetPrimaryColumnIndex() == colIdx:
++                    return modelObject.title
++                else:
++                    return ""
+ 
+         return self.GetStringValueAt(modelObject, colIdx)
+ 
+@@ -3091,7 +3128,9 @@
+             return -1
+ 
+         if isinstance(modelObject, ListGroup):
+-            if modelObject.isExpanded:
++            if (isinstance(modelObject, ListEmptyGroup)):
++                imageKey = ObjectListView.NAME_EXPANDED_IMAGE
++            elif modelObject.isExpanded:
+                 imageKey = ObjectListView.NAME_EXPANDED_IMAGE
+             else:
+                 imageKey = ObjectListView.NAME_COLLAPSED_IMAGE
+@@ -3110,7 +3149,9 @@
+ 
+         if isinstance(modelObject, ListGroup):
+             if colIdx == 0:
+-                if modelObject.isExpanded:
++                if (isinstance(modelObject, ListEmptyGroup)):
++                    imageKey = ObjectListView.NAME_EXPANDED_IMAGE
++                elif modelObject.isExpanded:
+                     imageKey = ObjectListView.NAME_EXPANDED_IMAGE
+                 else:
+                     imageKey = ObjectListView.NAME_COLLAPSED_IMAGE
+@@ -3165,6 +3206,7 @@
+         """
+         Collapse the given group and redisplay the list
+         """
++
+         self._DoExpandCollapse([group], False)
+ 
+     def ExpandAll(self, groups=None):
+@@ -3179,6 +3221,7 @@
+         """
+         Collapse the given groups (or all groups) and redisplay the list
+         """
++
+         if groups is None:
+             groups = self.groups
+         self._DoExpandCollapse(groups, False)
+@@ -3187,8 +3230,10 @@
+         """
+         Do the real work of expanding/collapsing the given groups
+         """
++
+         # Cull groups that aren't going to change
+-        groups = [x for x in groups if x.isExpanded != isExpanding]
++        # Empy groups cannot expand or contract
++        groups = [x for x in groups if (x.isExpanded != isExpanding)]
+         if not groups:
+             return
+ 
+@@ -3199,12 +3244,13 @@
+         if evt.IsVetoed():
+             return
+ 
+-        # Expand/contract the groups, then put those changes into effect
+         for x in evt.groups:
+             x.isExpanded = isExpanding
++
+         self._BuildInnerList()
+         self.SetItemCount(len(self.innerList))
+ 
++
+         # Refresh eveything from the first group down
+         i = min([self.GetIndexOf(x) for x in evt.groups])
+         self.RefreshItems(i, len(self.innerList) - 1)
+@@ -3256,7 +3302,9 @@
+         item = self.GetNextItem(-1, wx.LIST_NEXT_ALL, wx.LIST_STATE_DONTCARE)
+         while (item != -1):
+             model = self.innerList[item]
+-            if ((isinstance(model, ListGroup)) and (modelObject in model.modelObjects)):
++            if ((isinstance(model, ListGroup)      and (modelObject in model.modelObjects)) or 
++                (isinstance(model, ListEmptyGroup) and (modelObject == model.key))):
++
+                 realIndex = self._MapModelIndexToListIndex(item)
+                 self.SetItemState(realIndex, wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
+ 
+@@ -3491,6 +3539,8 @@
+         self.key = key
+         self.title = title
+ 
++        print("@9", key, title)
++
+         self.isExpanded = isExpanded
+         self.modelObjects = list()
+ 
+@@ -3500,6 +3550,12 @@
+         """
+         self.modelObjects.append(model)
+ 
++class ListEmptyGroup(ListGroup):
++    """A list group that is empty."""
++
++    def __init__(self, *args, **kwargs):
++        super().__init__(*args, **kwargs)
++
+ 
+ #######################################################################
+ 

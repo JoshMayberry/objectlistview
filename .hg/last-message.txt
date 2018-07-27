@@ -1,0 +1,2 @@
+Began replacing the LIstCtrl with a DataViewCtrl
+This will allow for making it do more things
