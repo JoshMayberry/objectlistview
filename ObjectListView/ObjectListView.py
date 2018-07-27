@@ -4864,8 +4864,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		try:
 			# self.Freeze()
 			self.modelObjects.extend(modelObjects)
-			self.model.Cleared()
-			# self.model.ItemAdded(None, modelObjects)
+			self.model.ItemsAdded(None, modelObjects)
 		finally:
 			pass
 			# self.Thaw()
@@ -5126,7 +5125,9 @@ class DataColumnDefn(object):
 			useInitialLetterForGroupKey=False,
 			groupTitleSingleItem=None,
 			groupTitlePluralItems=None,
-			renderer=None):
+			renderer=None,
+			rendererArgs=[],
+			rendererKwargs={}):
 		"""
 		Create a new ColumnDefn using the given attributes.
 		"""
@@ -5172,7 +5173,7 @@ class DataColumnDefn(object):
 		self.checkStateGetter = checkStateGetter
 		self.checkStateSetter = checkStateSetter
 
-		self.SetRenderer(renderer)
+		self.SetRenderer(renderer, *rendererArgs, **rendererKwargs)
 
 	#-------------------------------------------------------------------------
 	# Column properties
@@ -5257,22 +5258,25 @@ class DataColumnDefn(object):
 		log("@DataColumnDefn.GetRenderer")
 		return self.renderer
 
-	def SetRenderer(self, renderer):
+	def SetRenderer(self, renderer, *args, **kwargs):
 		"""
 		Applies the provided renderer
 		"""
+		global rendererCatalogue
+
 		log("@DataColumnDefn.SetRenderer", renderer)
-		if (renderer == None):
-			self.renderer = wx.dataview.DataViewTextRenderer()
-		else:
+		try:
+			self.renderer = rendererCatalogue[renderer](*args, **kwargs)
+		except AttributeError:
 			#https://github.com/wxWidgets/Phoenix/blob/master/samples/dataview/CustomRenderer.py
-			renderer = renderer
+			self.renderer = renderer
 
 def log(*data):
 	with open("log.txt", "a") as f:
 		f.write(f"{', '.join([f'{item}' for item in data])}\n")
 open('log.txt', 'w').close()
 
+#Models
 #https://github.com/wxWidgets/Phoenix/blob/master/samples/dataview/DataViewModel.py
 class NormalListModel(wx.dataview.PyDataViewModel):
 	"""Displays like an ObjectListView or GroupListView."""
@@ -5296,11 +5300,11 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		log("@model.AddNotifier", notifier)
 		return super().AddNotifier(notifier)
 
-	def ChangeValue(self, variant, item, col):
+	def ChangeValue(self, variant, item, column):
 		#Change the value of the given item and update the control to reflect it.
 		#This function simply calls SetValue and, if it succeeded, ValueChanged .
-		log("@model.ChangeValue", variant, item, col)
-		return super().ChangeValue(variant, item, col)
+		log("@model.ChangeValue", variant, item, column)
+		return super().ChangeValue(variant, item, column)
 
 	def Cleared(self):
 		#Called to inform the model that all data has been cleared.
@@ -5314,14 +5318,12 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		log("@model.Compare", item1, item2, column, ascending)
 		return super().Compare(item1, item2, column, ascending)
 
-	def GetAttr(self, item, col, attr):
+	def GetAttr(self, item, column, attribute):
 		#Override this to indicate that the item has special font attributes.
 		#This only affects the DataViewTextRendererText renderer.
 		#The base class version always simply returns False.
-		# log("@model.GetAttr", item, col, attr)
-		return super().GetAttr(item, col, attr)
-
-
+		# log("@model.GetAttr", item, column, attribute)
+		return super().GetAttr(item, column, attribute)
 
 		##log('GetAttr')
 		node = self.ItemToObject(item)
@@ -5372,10 +5374,11 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		return len(self.olv.columns)
 
 	# Map the data column numbers to the data type
-	def GetColumnType(self, col):
-		#Override this to indicate what type of data is stored in the column specified by col.
+	def GetColumnType(self, column):
+		#Override this to indicate what type of data is stored in the column specified by column.
 		#This should return a string indicating the type of data as reported by Variant .
-		log("@model.GetColumnType", col)
+		log("@model.GetColumnType", column)
+		hgjhghj
 
 		mapper = { 0 : 'string',
 				   1 : 'string',
@@ -5384,24 +5387,34 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				   4 : 'datetime',
 				   5 : 'bool',
 				   }
-		return mapper[col]
+		return mapper[column]
 
 	def GetParent(self, item):
-		#Override this to indicate which wx.dataview.DataViewItem representing the parent of item or an invalid wx.dataview.DataViewItem if the root item is the parent item.
+		#Override this to indicate which wx.dataview.DataViewItem representing the parent of item 
+		#or an invalid wx.dataview.DataViewItem if the root item is the parent item.
 		log("@model.GetParent", item)
 		# Return the item which is this item's parent.
 		##log("GetParent\n")
 
-		if not item:
-			return wx.dataview.NullDataViewItem
+		# if (isinstance(item, wx.dataview.DataViewItem)):
+		# 	return super().GetParent(item)
+		# else:
+		# 	return super().GetParent(self.ObjectToItem(item))
 
-		node = self.ItemToObject(item)
-		if isinstance(node, Genre):
+		if (isinstance(item, wx.dataview.DataViewItem)):
+			if (not item):
+				return wx.dataview.NullDataViewItem
+			node = self.ItemToObject(item)
+		else:
+			node = item
+
+		if (isinstance(node, ListGroup)):
 			return wx.dataview.NullDataViewItem
-		elif not isinstance(node, ListGroup):
-			for g in self.data:
-				if g.name == node.genre:
-					return self.ObjectToItem(g)
+		else:
+			# for group in self.olv.groups:
+			# 	if (groups.key == node.genre):
+			# 		return self.ObjectToItem(group)
+			return wx.dataview.NullDataViewItem
 
 	def GetValue(self, item, column):
 		#Override this to indicate the value of item.
@@ -5410,7 +5423,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 
 
-		
+
 		# Return the value to be displayed for this item and column. For this
 		# example we'll just pull the values from the data objects we
 		# associated with the items in GetChildren.
@@ -5422,10 +5435,13 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		except AttributeError:
 			raise AttributeError(f"There is no column {column}")
 
-		return self._Munge(node, defn.valueGetter)
-
-		import sys
-		sys.exit()
+		value = self._Munge(node, defn.valueGetter)
+		if (isinstance(defn.renderer, (wx.dataview.DataViewProgressRenderer, wx.dataview.DataViewSpinRenderer, 
+			wx.dataview.DataViewBitmapRenderer, wx.dataview.DataViewToggleRenderer))):
+				return value
+		elif (isinstance(defn.renderer, wx.dataview.DataViewIconTextRenderer)):
+			return wx.dataview.DataViewIconText(text = value[0], icon = value[1])
+		return self._StringToValue(value, defn.stringConverter)
 
 	def HasContainerColumns(self, item):
 		#Override this method to indicate if a container item merely acts as a headline (or for categorisation) 
@@ -5441,13 +5457,13 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		log("@model.HasDefaultCompare")
 		return super().HasDefaultCompare()
 
-	def HasValue(self, item, col):
+	def HasValue(self, item, column):
 		# Return True if there is a value in the given column of this item.
 
-		# All normal items have values in all columns but the container items only show their label in the first column (col == 0) by default (but see HasContainerColumns ). 
+		# All normal items have values in all columns but the container items only show their label in the first column (column == 0) by default (but see HasContainerColumns ). 
 		#So this function always returns True for the first column while for the other ones it returns True only if the item is not a container or HasContainerColumns was overridden to return True for it.
-		log("@model.HasValue", item, col)
-		return super().HasValue(item, col)
+		log("@model.HasValue", item, column)
+		return super().HasValue(item, column)
 
 	def IsContainer(self, item):
 		#Override this to indicate of item is a container, i.e. if it can have child items.
@@ -5470,13 +5486,13 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# but everything else (the song objects) are not
 		return False
 
-	def IsEnabled(self, item, col):
+	def IsEnabled(self, item, column):
 		# Override this to indicate that the item should be disabled.
 		# Disabled items are displayed differently (e.g. grayed out) and cannot be interacted with.
 		# The base class version always returns True, thus making all items enabled by default.
 
-		# log("@model.IsEnabled", item, col)
-		return super().IsEnabled(item, col)
+		# log("@model.IsEnabled", item, column)
+		return super().IsEnabled(item, column)
 
 	def IsListModel(self):
 		# log("@model.IsListModel")
@@ -5489,23 +5505,39 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def ItemAdded(self, parent, item):
 		#Call this to inform the model that an item has been added to the data.
 		log("@model.ItemAdded", parent, item)
+
+		if (parent is None):
+			parent = self.GetParent(item)
+		if (not isinstance(item, wx.dataview.DataViewItem)):
+			item = self.ObjectToItem(item)
 		return super().ItemAdded(parent, item)
 
 	def ItemChanged(self, item):
 		#Call this to inform the model that an item has changed.
 		# This will eventually emit a wxEVT_DATAVIEW_ITEM_VALUE_CHANGED event (in which the column fields will not be set) to the user.
 		log("@model.ItemChanged", item)
+		if (not isinstance(item, wx.dataview.DataViewItem)):
+			item = self.ObjectToItem(item)
 		return super().ItemChanged(item)
 
 	def ItemDeleted(self, parent, item):
 		#Call this to inform the model that an item has been deleted from the data.
 		log("@model.ItemDeleted", parent, item)
+		if (not isinstance(item, wx.dataview.DataViewItem)):
+			item = self.ObjectToItem(item)
 		return super().ItemDeleted(parent, item)
 
 	def ItemsAdded(self, parent, items):
 		#Call this to inform the model that several items have been added to the data.
 		log("@model.ItemsAdded", parent, items)
-		return super().ItemsAdded(parent, items)
+
+		if (parent is not None):
+			return super().ItemsAdded(parent, items)
+		
+		for item in items:
+			if (not self.ItemAdded(parent, item)):
+				return False
+		return True
 
 	def ItemsChanged(self, items):
 		# Call this to inform the model that several items have changed.
@@ -5528,41 +5560,110 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		log("@model.Resort")
 		return super().Resort()
 
-	def SetValue(self, value, item, col):
+	def SetValue(self, value, item, column):
 		# This gets called in order to set a value in the data model.
 		# The most common scenario is that the wx.dataview.DataViewCtrl calls this method after the user changed some data in the view.
 		# This is the function you need to override in your derived class but if you want to call it, ChangeValue is usually more convenient as otherwise you need to manually call ValueChanged to update the control itself.
-
-
-		log("@model.SetValue", value, item, col)
-		return super().SetValue(value, item, col)
-
-
-
+		log("@model.SetValue", value, item, column)
 
 		# We're not allowing edits in column zero (see below) so we just need
 		# to deal with Song objects and cols 1 - 5
 
 		node = self.ItemToObject(item)
-		if isinstance(node, Song):
-			if col == 1:
-				node.artist = value
-			elif col == 2:
-				node.title = value
-			elif col == 3:
-				node.id = value
-			elif col == 4:
-				node.date = value
-			elif col == 5:
-				node.like = value
+		if (isinstance(node, ListGroup)):
+			return True
+
+		try:
+			defn = self.olv.columns[column]
+		except AttributeError:
+			raise AttributeError(f"There is no column {column}")
+
+		if (defn.valueSetter is None):
+			self._SetValueUsingMunger(node, value, defn.valueGetter, False)
+		else:
+			self._SetValueUsingMunger(node, value, defn.valueSetter, True)
+			
 		return True
 
-	def ValueChanged(self, item, col):
+	def ValueChanged(self, item, column):
 		# Call this to inform this model that a value in the model has been changed.
 		# This is also called from wx.dataview.DataViewCtrl‘s internal editing code, e.g. when editing a text field in the control.
 		# This will eventually emit a wxEVT_DATAVIEW_ITEM_VALUE_CHANGED event to the user.
-		log("@model.ValueChanged", item, col)
-		return super().ValueChanged(item, col)
+		log("@model.ValueChanged", item, column)
+		return super().ValueChanged(item, column)
+
+	def _StringToValue(self, value, converter):
+		"""
+		Convert the given value to a string, using the given converter
+		"""
+		try:
+			return converter(value)
+		except TypeError:
+			pass
+
+		if converter and isinstance(
+			value,
+			(datetime.datetime,
+			 datetime.date,
+			 datetime.time)):
+			return value.strftime(self.stringConverter)
+
+		if converter and isinstance(value, wx.DateTime):
+			return value.Format(self.stringConverter)
+
+		# By default, None is changed to an empty string.
+		if not converter and not value:
+			return ""
+
+		fmt = converter or "%s"
+		try:
+			return fmt % value
+		except UnicodeError:
+			return unicode(fmt) % value
+
+	def _SetValueUsingMunger(self, modelObject, value, munger, shouldInvokeCallable):
+		"""
+		Look for ways to update modelObject with value using munger. If munger finds a
+		callable, it will be called if shouldInvokeCallable == True.
+		"""
+		# If there isn't a munger, we can't do anything
+		if munger is None:
+			return
+
+		# Is munger a function?
+		if callable(munger):
+			if shouldInvokeCallable:
+				munger(modelObject, value)
+			return
+
+		# Try indexed access for dictionary or list like objects
+		try:
+			modelObject[munger] = value
+			return
+		except:
+			pass
+
+		# Is munger the name of some slot in the modelObject?
+		try:
+			attr = getattr(modelObject, munger)
+		except TypeError:
+			return
+		except AttributeError:
+			return
+
+		# Is munger the name of a method?
+		if callable(attr):
+			if shouldInvokeCallable:
+				attr(value)
+			return
+
+		# If we get to here, it seems that munger is the name of an attribute or
+		# property on modelObject. Try to set, realising that many things could
+		# still go wrong.
+		try:
+			setattr(modelObject, munger, value)
+		except:
+			pass
 
 	def _Munge(self, modelObject, munger):
 		"""
@@ -5612,3 +5713,111 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			return modelObject[munger]
 		except:
 			return None
+
+#Renderers
+class Renderer_MultiImage(wx.dataview.DataViewCustomRenderer):
+	def __init__(self, choices = None, mode = None, alignment = None, **kwargs):
+		wx.dataview.DataViewCustomRenderer.__init__(self, mode = mode, align = alignment, **kwargs)
+		self.value = None
+
+	def SetValue(self, value):
+		#self.log.write('MyCustomRenderer.SetValue: %s\n' % value)
+		self.value = value
+		return True
+
+	def GetValue(self):
+		#self.log.write('MyCustomRenderer.GetValue\n')
+		return self.value
+
+	def GetSize(self):
+		# Return the size needed to display the value.  The renderer
+		# has a helper function we can use for measuring text that is
+		# aware of any custom attributes that may have been set for
+		# this item.
+		value = self.value if self.value else ""
+		size = self.GetTextExtent(value)
+		return size
+
+
+	def Render(self, rect, dc, state):
+		if state != 0:
+			self.log.write('Render: %s, %d\n' % (rect, state))
+
+		if not state & dv.DATAVIEW_CELL_SELECTED:
+			# we'll draw a shaded background to see if the rect correctly
+			# fills the cell
+			dc.SetBrush(wx.Brush('light grey'))
+			dc.SetPen(wx.TRANSPARENT_PEN)
+			rect.Deflate(1, 1)
+			dc.DrawRoundedRectangle(rect, 2)
+
+		# And then finish up with this helper function that draws the
+		# text for us, dealing with alignment, font and color
+		# attributes, etc
+		value = self.value if self.value else ""
+		self.RenderText(value,
+						4,   # x-offset, to compensate for the rounded rectangles
+						rect,
+						dc,
+						state # wxDataViewCellRenderState flags
+						)
+		return True
+
+
+	# The HasEditorCtrl, CreateEditorCtrl and GetValueFromEditorCtrl
+	# methods need to be implemented if this renderer is going to
+	# support in-place editing of the cell value, otherwise they can
+	# be omitted.
+
+	def HasEditorCtrl(self):
+		self.log.write('HasEditorCtrl')
+		return True
+
+
+	def CreateEditorCtrl(self, parent, labelRect, value):
+		self.log.write('CreateEditorCtrl: %s' % labelRect)
+		ctrl = wx.TextCtrl(parent,
+						   value=value,
+						   pos=labelRect.Position,
+						   size=labelRect.Size)
+
+		# select the text and put the caret at the end
+		ctrl.SetInsertionPointEnd()
+		ctrl.SelectAll()
+
+		return ctrl
+
+
+	def GetValueFromEditorCtrl(self, editor):
+		self.log.write('GetValueFromEditorCtrl: %s' % editor)
+		value = editor.GetValue()
+		return True, value
+
+
+	# The LeftClick and Activate methods serve as notifications
+	# letting you know that the user has either clicked or
+	# double-clicked on an item.  Implementing them in your renderer
+	# is optional.
+
+	def LeftClick(self, pos, cellRect, model, item, col):
+		self.log.write('LeftClick')
+		return False
+
+
+	def Activate(self, cellRect, model, item, col):
+		self.log.write('Activate')
+		return False
+
+rendererCatalogue = {
+	None:       wx.dataview.DataViewTextRenderer,
+	"text":     wx.dataview.DataViewTextRenderer,
+	"choice":   wx.dataview.DataViewChoiceRenderer,
+	"progress": wx.dataview.DataViewProgressRenderer,
+	"spin":     wx.dataview.DataViewSpinRenderer,
+	"bmp":      wx.dataview.DataViewBitmapRenderer,
+	"icon":     wx.dataview.DataViewIconTextRenderer,
+	"radio":    wx.dataview.DataViewToggleRenderer,
+
+	# "multi_image": Renderer_MultiImage,
+}
+
