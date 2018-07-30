@@ -4783,6 +4783,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.showGroups 				= kwargs.pop("showGroups", False)
 		self.showItemCounts 			= kwargs.pop("showItemCounts", True)
 		self.useExpansionColumn 		= kwargs.pop("useExpansionColumn", True)
+		self.separateGroupColumn 		= kwargs.pop("separateGroupColumn", False)
 		self.alwaysGroupByColumnIndex	= kwargs.pop("alwaysGroupByColumnIndex", -1)
 		self.putBlankLineBetweenGroups	= kwargs.pop("putBlankLineBetweenGroups", True)
 		self.rebuildGroup_onColumnClick = kwargs.pop("rebuildGroup_onColumnClick", True)
@@ -4862,7 +4863,8 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			else:
 				self.AddColumnDefn(DataColumnDefn(*x))
 
-		self.UpdateGroupColumn()
+		if (self.separateGroupColumn):
+			self.UpdateGroupColumn()
 
 		# # Try to preserve the sort column
 		# # self.SetSortColumn(sortCol)
@@ -5069,15 +5071,16 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Resize our auto sizing columns to match the data
 		"""
-		for (iCol, col) in enumerate(self.columns):
-			if col.width == wx.LIST_AUTOSIZE:
-				self.SetColumnWidth(iCol, wx.LIST_AUTOSIZE)
+		# _log("@DataObjectListView.AutoSizeColumns")
+		for iCol, col in self.columns.items():
+			if (col.width == wx.LIST_AUTOSIZE):
+				col.column.SetWidth(wx.LIST_AUTOSIZE)
 
 				# The new width must be within our minimum and maximum
-				colWidth = self.GetColumnWidth(iCol)
+				colWidth = col.column.GetWidth()
 				boundedWidth = col.CalcBoundedWidth(colWidth)
-				if colWidth != boundedWidth:
-					self.SetColumnWidth(iCol, boundedWidth)
+				if (colWidth != boundedWidth):
+					col.column.SetWidth(boundedWidth)
 
 		self._ResizeSpaceFillingColumns()
 
@@ -5086,53 +5089,46 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Change the width of space filling columns so that they fill the
 		unoccupied width of the listview
 		"""
+		# _log("@DataObjectListView._ResizeSpaceFillingColumns")
 		# If the list isn't in report view or there are no space filling
 		# columns, just return
-		if not self.InReportView():
+		if (not self.InReportView()):
 			return
 
 		# Don't do anything if there are no space filling columns
-		if True not in set(x.isSpaceFilling for x in self.columns.values()):
+		if (True not in set(x.isSpaceFilling for x in self.columns.values())):
 			return
 
 		# Calculate how much free space is available in the control
-		totalFixedWidth = sum(self.GetColumnWidth(i) for i, x in self.columns.items() if not x.isSpaceFilling)
-		# if wx.Platform == "__WXGTK__":
-		#    clientSize = self.MainWindow.GetClientSizeTuple()[0]
-		# else:
-		#    clientSize = self.GetClientSizeTuple()[0]
-		#freeSpace = max(0, clientSize - totalFixedWidth)
-		if 'phoenix' in wx.PlatformInfo:
+		totalFixedWidth = sum(x.column.GetWidth() for x in self.columns.values() if not x.isSpaceFilling)
+		if ('phoenix' in wx.PlatformInfo):
 			freeSpace = max(0, self.GetClientSize()[0] - totalFixedWidth)
 		else:
 			freeSpace = max(0, self.GetClientSizeTuple()[0] - totalFixedWidth)
 
-		# Calculate the total number of slices the free space will be divided
-		# into
+		# Calculate the total number of slices the free space will be divided into
 		totalProportion = sum(x.freeSpaceProportion for x in self.columns.values() if x.isSpaceFilling)
 
-		# Space filling columns that would escape their boundary conditions
-		# are treated as fixed size columns
+		# Space filling columns that would escape their boundary conditions are treated as fixed size columns
 		columnsToResize = []
-		for (i, col) in self.columns.items():
-			if col.isSpaceFilling:
+		for i, col in self.columns.items():
+			if (col.isSpaceFilling):
 				newWidth = freeSpace * col.freeSpaceProportion / totalProportion
 				boundedWidth = col.CalcBoundedWidth(newWidth)
-				if newWidth == boundedWidth:
-					columnsToResize.append((i, col))
+				if (newWidth == boundedWidth):
+					columnsToResize.append(col)
 				else:
 					freeSpace -= boundedWidth
 					totalProportion -= col.freeSpaceProportion
-					if self.GetColumnWidth(i) != boundedWidth:
-						self.SetColumnWidth(i, boundedWidth)
+					if (col.column.GetWidth() != boundedWidth):
+						col.column.SetWidth(boundedWidth)
 
-		# Finally, give each remaining space filling column a proportion of the
-		# free space
-		for (i, col) in columnsToResize:
+		# Finally, give each remaining space filling column a proportion of the free space
+		for col in columnsToResize:
 			newWidth = freeSpace * col.freeSpaceProportion / totalProportion
 			boundedWidth = col.CalcBoundedWidth(newWidth)
-			if self.GetColumnWidth(i) != boundedWidth:
-				self.SetColumnWidth(i, boundedWidth)
+			if (col.column.GetWidth() != boundedWidth):
+				col.column.SetWidth(boundedWidth)
 
 	# --------------------------------------------------------------#000000#FFFFFF
 	# Commands
@@ -5848,6 +5844,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		The ListView is being resized
 		"""
+		_log("@DataObjectListView._HandleSize")
 		self._PossibleFinishCellEdit()
 		evt.Skip()
 		self._ResizeSpaceFillingColumns()
@@ -6617,7 +6614,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# If the parent item is invalid then it represents the hidden root
 		# item, so we'll use the genre objects as its children and they will
 		# end up being the collection of visible roots in our tree.
-		print("!!!!!!!!!!!!!", parent, not parent)
 		if not parent:
 			if (self.olv.showGroups):
 				for group in self.olv.groups:
@@ -6811,7 +6807,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		
 		for item in items:
 			answer = self.ItemAdded(parent, item)
-			print("$$$$$$$$$$$$$$", answer)
 		return True
 
 	def ItemsChanged(self, items):
