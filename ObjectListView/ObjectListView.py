@@ -4771,8 +4771,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.filter 					= kwargs.pop("filter", None)
 		self.sortable 					= kwargs.pop("sortable", True)
 		self.caseSensative 				= kwargs.pop("caseSensative", True)
-		self.sortAscending				= kwargs.pop("sortAscending", True)
-		self.sortColumnIndex			= kwargs.pop("sortColumnIndex", -1)
 		self.compareFunction			= kwargs.pop("compareFunction", None)
 		self.groupCompareFunction 		= kwargs.pop("groupCompareFunction", None)
 		self.typingSearchesSortColumn	= kwargs.pop("typingSearchesSortColumn", True)
@@ -4893,7 +4891,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		sortCol = self.GetSortColumn()
 		self.ClearAll()
 		self.ClearColumns()
-		# self.checkStateColumn = None
+
 		self.columns = {}
 		for x in columns:
 			if (isinstance(x, DataColumnDefn)):
@@ -4904,10 +4902,10 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if (self.separateGroupColumn):
 			self.UpdateGroupColumn()
 
-		# # Try to preserve the sort column
-		# # self.SetSortColumn(sortCol)
-		# # if (repopulate):
-		# #     self.RepopulateList()
+		#Try to preserve the sort column
+		self.SetSortColumn(sortCol)
+		if (repopulate):
+			self.RepopulateList()
 
 	def UpdateGroupColumn(self):
 		if (not self.showGroups):
@@ -5113,18 +5111,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				return i
 		return -1
 
-	def GetSortColumn(self, returnIndex = False):
-		"""
-		Return the column by which the rows of this control should be sorted
-		"""
-		if self.sortColumnIndex < 0 or self.sortColumnIndex >= len(
-				self.columns):
-			return None
-		else:
-			if (returnIndex):
-				return self.sortColumnIndex
-			return self.columns[self.sortColumnIndex]
-
 	def GetAlwaysGroupByColumn(self, returnIndex = False):
 		"""
 		Get the column by which the rows should be always be grouped.
@@ -5280,37 +5266,17 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		# self.model.Cleared()
 
-	def EnsureCellVisible(self, rowIndex, subItemIndex):
+	def EnsureVisible(self, modelObject, column = None):
 		"""
-		Make sure the user can see all of the given cell, scrolling if necessary.
-		Return the bounds to the cell calculated after the cell has been made visible.
-		Return None if the cell cannot be made visible (non-Windows platforms can't scroll
-		the listview horizontally)
-
-		If the cell is bigger than the ListView, the top left of the cell will be visible.
+		Make sure the user can see the given model object.
 		"""
 
-		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewCtrl.html#wx.dataview.DataViewCtrl.EnsureVisible
-		jhkjjkhkjkhjjk
+		item = self.model.ObjectToItem(modelObject)
 
-		self.EnsureVisible(rowIndex)
-		bounds = self.GetSubItemRect(
-			rowIndex,
-			subItemIndex,
-			wx.LIST_RECT_BOUNDS)
-		boundsRight = bounds[0] + bounds[2]
-		if bounds[0] < 0 or boundsRight > self.GetSize()[0]:
-			if bounds[0] < 0:
-				horizDelta = bounds[0] - (self.GetSize()[0] / 4)
-			else:
-				horizDelta = boundsRight - self.GetSize()[0] + (
-					self.GetSize()[0] / 4)
-			if wx.Platform == "__WXMSW__":
-				self.ScrollList(horizDelta, 0)
-			else:
-				return None
+		if (column != None):
+			column = self.columns[column].column
 
-		return self.GetSubItemRect(rowIndex, subItemIndex, wx.LIST_RECT_LABEL)
+		super().EnsureVisible(item, column = column)
 
 	def RepopulateList(self):
 		"""
@@ -5457,9 +5423,71 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Sort the items by the given column
 		"""
 		_log("@DataObjectListView.SortBy", newColumnIndex, ascending)
-		self.sortColumnIndex = newColumnIndex
-		self.sortAscending = ascending
-		self.model.Resort()
+		self.SetSortColumn(newColumnIndex, ascending = ascending, resortNow = True)
+
+	def GetSortColumn(self, returnIndex = False):
+		"""
+		Return the column by which the rows of this control should be sorted
+		"""
+
+		column = self.GetSortingColumn()
+		if (column != None):
+			index = column.GetModelColumn()
+			if (returnIndex):
+				return index
+			return self.columns[index]
+		else:
+			index = -1
+			if (returnIndex):
+				return index
+
+	def SetSortColumn(self, column, ascending = True, resortNow = False, unsortOnNone = True):
+		"""
+		Set the column by which the rows should be sorted.
+
+		'column' can be None (which makes the list be unsorted), a ColumnDefn,
+		or the index of the column desired
+		*unsortOnNone* determines if the list unsorts itself when *column* is None.
+		"""
+		if (column is None):
+			index = -1
+		elif (isinstance(column, DataColumnDefn)):
+			try:
+				index = [key for key, value in self.columns.items() if (value is column)][0]
+			except IndexError:
+				index = -1
+		else:
+			index = column
+
+		if (index != -1):
+			self.columns[index].column.SetSortOrder(ascending) #`SetSortOrder` indicates that this column is currently used for sorting the control and also sets the sorting direction
+		else:
+			item = self.GetSortingColumn()
+			if (item != None):
+				item.UnsetAsSortKey() #`UnsetAsSortKey` is the reverse of SetSortOrder and is called to indicate that this column is not used for sorting any longer.
+				if (unsortOnNone):
+					self.model.Cleared()
+		
+		if (resortNow):
+			self.model.Resort()
+
+	def SetCompareFunction(self, function):
+		"""
+		Allows the user to use a different compare function for sorting items.
+
+		The comparison function must accept two model objects as two parameters.
+		The comparison function should return negative, null or positive value depending on whether the first item is less than, equal to or greater than the second one.
+		"""
+		self.compareFunction = function
+
+	def SetGroupCompareFunction(self, function):
+		"""
+		Allows the user to use a different compare function for sorting groups.
+
+		The comparison function must accept two ListGroup objects as two parameters.
+		The comparison function should return negative, null or positive value depending on whether the first item is less than, equal to or greater than the second one.
+		"""
+		self.groupCompareFunction = function
 
 	#Editing
 	# def _PossibleStartCellEdit(self, rowIndex, subItemIndex):
@@ -6153,8 +6181,6 @@ class DataColumnDefn(object):
 	def SetSortable(self, state = None):
 		if (state is not None):
 			self.isSortable = state
-
-		print("@1", self.isSortable)
 
 		self.column.Sortable = self.isSortable
 		self.column.Reorderable = self.isSortable
@@ -7051,7 +7077,11 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		_log("@model.Resort")
 
 		#Fire a SortEvent that can be catched by an OLV-using developer using Bind() for this event
-		event = OLVEvent.SortEvent(self.olv, self.olv.sortColumnIndex, self.olv.sortAscending, False)
+		column = self.olv.GetSortingColumn()
+		if (column != None):
+			event = OLVEvent.SortEvent(self.olv, column.GetModelColumn(), column.IsSortOrderAscending(), False)
+		else:
+			event = OLVEvent.SortEvent(self.olv, -1, True, False)
 		self.olv.GetEventHandler().ProcessEvent(event)
 		if (event.IsVetoed()):
 			return
