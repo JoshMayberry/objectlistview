@@ -4750,10 +4750,18 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.columns = {}
 		self.modelObjects = []
 
+		self.noHeader 					= kwargs.pop("noHeader", False)
 		self.rowFormatter 				= kwargs.pop("rowFormatter", None)
+		self.singleSelect 				= kwargs.pop("singleSelect", True)
+		self.verticalLines 				= kwargs.pop("verticalLines", False)
+		self.horizontalLines 			= kwargs.pop("horizontalLines", False)
+		
+		self.groupBackColor				= kwargs.pop("groupBackColor", None)# wx.Colour(195, 144, 212))  # LIGHT MAGENTA
 		self.oddRowsBackColor			= kwargs.pop("oddRowsBackColor", wx.Colour(255, 250, 205))  # LEMON CHIFFON
 		self.evenRowsBackColor			= kwargs.pop("evenRowsBackColor", wx.Colour(240, 248, 255))  # ALICE BLUE
 		self.useAlternateBackColors 	= kwargs.pop("useAlternateBackColors", True)
+		self.backgroundColor 			= kwargs.pop("backgroundColor", None)
+		self.foregroundColor 			= kwargs.pop("foregroundColor", None)
 		
 		#Sorting
 		self.groups = []
@@ -4788,7 +4796,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.putBlankLineBetweenGroups	= kwargs.pop("putBlankLineBetweenGroups", True)
 		self.rebuildGroup_onColumnClick = kwargs.pop("rebuildGroup_onColumnClick", True)
 
-		self.groupFont 					= kwargs.pop("groupFont", None)
+		self.groupFont 					= kwargs.pop("groupFont", None) #(Bold, Italic, Color)
 		self.groupTextColour 			= kwargs.pop("groupTextColour", wx.Colour(33, 33, 33, 255))
 		self.groupBackgroundColour 		= kwargs.pop("groupBackgroundColour", wx.Colour(159, 185, 250, 249))
 
@@ -4797,19 +4805,46 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		emptyListMsg 					= kwargs.pop("emptyListMsg", "This list is empty")
 		emptyListFont 					= kwargs.pop("emptyListFont", wx.Font(24, wx.DEFAULT, wx.NORMAL, wx.NORMAL, 0, ""))
 
+		#Setup Style
+		style = kwargs.pop("style", None) #Doe NOT pass in wx.LC_REPORT, or it will show doen A LOT
+		if (style is None):
+			style = "0"
+			if (self.singleSelect):
+				style += "|wx.dataview.DV_SINGLE"
+			else:
+				style += "|wx.dataview.DV_MULTIPLE"
 
-		wx.dataview.DataViewCtrl.__init__(self, *args, **kwargs)
+			if (self.horizontalLines):
+				style += "|wx.dataview.DV_HORIZ_RULES"
+
+			if (self.verticalLines):
+				style += "|wx.dataview.DV_VERT_RULES"
+
+			if (self.noHeader):
+				style += "|wx.dataview.DV_NO_HEADER"
+
+			# if (self.useAlternateBackColors):
+			# 	#Currently only supported by the native GTK and OS X implementations
+			# 	style += "|wx.dataview.DV_ROW_LINES" #Cannot change colors?
+			wx.dataview.DataViewCtrl.__init__(self, *args, style = eval(style), **kwargs)
+		else:
+			wx.dataview.DataViewCtrl.__init__(self, *args, style = style, **kwargs)
+
+		if (self.backgroundColor != None):
+			self.SetBackgroundColour(self.backgroundColor)
+		if (self.foregroundColor != None):
+			self.SetForegroundColour(self.foregroundColor)
 
 		if (self.groupFont is None):
 			font = self.GetFont()
 			self.groupFont = wx.FFont(font.GetPointSize(), font.GetFamily(), wx.FONTFLAG_BOLD, font.GetFaceName())
+		if (isinstance(self.groupFont, wx.Font)):
+			self.groupFont = (self.groupFont.GetWeight() == wx.BOLD, self.groupFont.GetStyle() == wx.ITALIC, wx.Colour(0, 0, 0))
 
 		self.SetModel()
 
 		# self.Bind(wx.EVT_CHAR, self._HandleChar)
-		# self.Bind(wx.EVT_LEFT_DOWN, self._HandleLeftDown)
-		# self.Bind(wx.EVT_LEFT_UP, self._HandleLeftClickOrDoubleClick)
-		# self.Bind(wx.EVT_LEFT_DCLICK, self._HandleLeftClickOrDoubleClick)
+		# self.Bind(wx.EVT_DATAVIEW_ITEM_ACTIVATED, self._HandleLeftClickOrDoubleClick)
 		# self.Bind(wx.EVT_LIST_COL_BEGIN_DRAG, self._HandleColumnBeginDrag)
 		# self.Bind(wx.EVT_LIST_COL_END_DRAG, self._HandleColumnEndDrag)
 		# self.Bind(wx.EVT_MOUSEWHEEL, self._HandleMouseWheel)
@@ -5187,6 +5222,33 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		# self.model.Cleared()
 
+	def EnsureCellVisible(self, rowIndex, subItemIndex):
+		"""
+		Make sure the user can see all of the given cell, scrolling if necessary.
+		Return the bounds to the cell calculated after the cell has been made visible.
+		Return None if the cell cannot be made visible (non-Windows platforms can't scroll
+		the listview horizontally)
+
+		If the cell is bigger than the ListView, the top left of the cell will be visible.
+		"""
+		self.EnsureVisible(rowIndex)
+		bounds = self.GetSubItemRect(
+			rowIndex,
+			subItemIndex,
+			wx.LIST_RECT_BOUNDS)
+		boundsRight = bounds[0] + bounds[2]
+		if bounds[0] < 0 or boundsRight > self.GetSize()[0]:
+			if bounds[0] < 0:
+				horizDelta = bounds[0] - (self.GetSize()[0] / 4)
+			else:
+				horizDelta = boundsRight - self.GetSize()[0] + (
+					self.GetSize()[0] / 4)
+			if wx.Platform == "__WXMSW__":
+				self.ScrollList(horizDelta, 0)
+			else:
+				return None
+
+		return self.GetSubItemRect(rowIndex, subItemIndex, wx.LIST_RECT_LABEL)
 
 	def RepopulateList(self):
 		"""
@@ -5462,6 +5524,100 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		return
 		# if self.IsCellEditing():
 		# 	self.CancelCellEdit()
+
+	#-------------------------------------------------------------------------
+	# Calculating
+
+	def GetSubItemRect(self, rowIndex, subItemIndex, flag):
+		"""
+		Poor mans replacement for missing wxWindows method.
+
+		The rect returned takes scroll position into account, so negative x and y are
+		possible.
+		"""
+		_log("@DataObjectListView.GetSubItemRect", rowIndex, subItemIndex, flag)
+		# Linux doesn't handle wx.LIST_RECT_LABEL flag. So we always get
+		# the whole bounds then par it down to the cell we want
+		rect = self.GetItemRect(rowIndex, wx.LIST_RECT_BOUNDS)
+
+		if (self.InReportView()):
+			rect = [0 - self.GetScrollPos( wx.HORIZONTAL),
+				rect.Y,
+				0,
+				rect.Height]
+			for i in range(subItemIndex + 1):
+				rect[0] += rect[2]
+				rect[2] = self.GetColumnWidth(i)
+
+		# If we want only the label rect for sub items, we have to manually
+		# adjust for any image the subitem might have
+		if flag == wx.LIST_RECT_LABEL:
+			lvi = self.GetItem(rowIndex, subItemIndex)
+			if (lvi.GetImage() != -1):
+				if( self.HasFlag(wx.LC_ICON)):
+					imageWidth = self.normalImageList.GetSize(0)[0]
+					rect[1] += imageWidth
+					rect[3] -= imageWidth
+				else:
+					imageWidth = self.smallImageList.GetSize(0)[0] + 1
+					rect[0] += imageWidth
+					rect[2] -= imageWidth
+
+		# log "rect=%s" % rect
+		return rect
+
+	def HitTestSubItem(self, pt):
+		"""
+		Return a tuple indicating which (item, subItem) the given pt (client coordinates) is over.
+
+		This uses the buildin version on Windows, and poor mans replacement on other platforms.
+		"""
+		_log("@DataObjectListView.HitTestSubItem", pt)
+		# The buildin version works on Windows
+		if (wx.Platform == "__WXMSW__"):
+			return wx.ListCtrl.HitTestSubItem(self, pt)
+
+		(rowIndex, flags) = self.HitTest(pt)
+
+		# Did the point hit any item?
+		if (flags & wx.LIST_HITTEST_ONITEM) == 0:
+			return (-1, 0, -1)
+
+		# If it did hit an item and we are not in report mode, it must be the
+		# primary cell
+		if (not self.InReportView()):
+			return (rowIndex, wx.LIST_HITTEST_ONITEM, 0)
+
+		# Find which subitem is hit
+		right = 0
+		scrolledX = self.GetScrollPos(wx.HORIZONTAL) + pt.x
+		for i, col in self.columns.items():
+			left = right
+			right += col.column.GetWidth()
+			if (scrolledX < right):
+				flag = wx.LIST_HITTEST_ONITEMLABEL
+				# if (scrolledX - left) < self.smallImageList.GetSize(0)[0]:
+				# 	flag = wx.LIST_HITTEST_ONITEMICON
+				# else:
+				# 	flag = wx.LIST_HITTEST_ONITEMLABEL
+				return (rowIndex, flag, i)
+
+		return (rowIndex, 0, -1)
+
+
+	# ----------------------------------------------------------------------
+	# Utilities
+
+	def _IsPrintable(self, char):
+		"""
+		Check if char is printable using unicodedata as string.isPrintable
+		is only available in Py3.
+		"""
+		cat = unicodedata.category(char)
+		if cat[0] == "L":
+			return True
+		else:
+			return False
 
 	#-------------------------------------------------------------------------
 	# Event handling
@@ -5758,87 +5914,87 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.SetColumnWidth(colIndex, newWidth)
 		self._ResizeSpaceFillingColumns()
 
-	def _HandleLeftDown(self, evt):
-		"""
-		Handle a left down on the ListView
-		"""
-		evt.Skip()
+	# def _HandleLeftDown(self, evt):
+	# 	"""
+	# 	Handle a left down on the ListView
+	# 	"""
+	# 	evt.Skip()
 
-		# Test for a mouse down on the image of the check box column
-		if self.InReportView():
-			(row, flags, subitem) = self.HitTestSubItem(evt.GetPosition())
-		else:
-			(row, flags) = self.HitTest(evt.GetPosition())
-			subitem = 0
+	# 	# Test for a mouse down on the image of the check box column
+	# 	if (self.InReportView()):
+	# 		(row, flags, subitem) = self.HitTestSubItem(evt.GetPosition())
+	# 	else:
+	# 		(row, flags) = self.HitTest(evt.GetPosition())
+	# 		subitem = 0
 
-		if flags == wx.LIST_HITTEST_ONITEMICON:
-			self._HandleLeftDownOnImage(row, subitem)
+	# 	if flags == wx.LIST_HITTEST_ONITEMICON:
+	# 		self._HandleLeftDownOnImage(row, subitem)
 
-	def _HandleLeftDownOnImage(self, rowIndex, subItemIndex):
-		"""
-		Handle a left click on the image at the given cell
-		"""
-		column = self.columns[subItemIndex]
-		if not column.HasCheckState():
-			return
+	# def _HandleLeftDownOnImage(self, rowIndex, subItemIndex):
+	# 	"""
+	# 	Handle a left click on the image at the given cell
+	# 	"""
+	# 	column = self.columns[subItemIndex]
+	# 	if not column.HasCheckState():
+	# 		return
 
-		self._PossibleFinishCellEdit()
-		modelObject = self.GetObjectAt(rowIndex)
-		if modelObject is not None:
-			column.SetCheckState(
-				modelObject,
-				not column.GetCheckState(modelObject))
-			self.RefreshIndex(rowIndex, modelObject)
+	# 	self._PossibleFinishCellEdit()
+	# 	modelObject = self.GetObjectAt(rowIndex)
+	# 	if modelObject is not None:
+	# 		column.SetCheckState(
+	# 			modelObject,
+	# 			not column.GetCheckState(modelObject))
+	# 		self.RefreshIndex(rowIndex, modelObject)
 
-	def _HandleLeftClickOrDoubleClick(self, evt):
-		"""
-		Handle a left click or left double click on the ListView
-		"""
-		evt.Skip()
+	# def _HandleLeftClickOrDoubleClick(self, evt):
+	# 	"""
+	# 	Handle a left click or left double click on the ListView
+	# 	"""
+	# 	evt.Skip()
 
-		# IF any modifiers are down, OR
-		#    the listview isn't editable, OR
-		#    we should edit on double click and this is a single click, OR
-		#    we should edit on single click and this is a double click,
-		# THEN we don't try to start a cell edit operation
-		if wx.VERSION > (2, 9, 1, 0):
-			if evt.altDown or evt.controlDown or evt.shiftDown:
-				return
-		else:
-			if evt.m_altDown or evt.m_controlDown or evt.m_shiftDown:
-				return
-		if self.cellEditMode == self.CELLEDIT_NONE:
-			return
-		if evt.LeftUp() and self.cellEditMode == self.CELLEDIT_DOUBLECLICK:
-			return
-		if evt.LeftDClick() and self.cellEditMode == self.CELLEDIT_SINGLECLICK:
-			return
+	# 	# IF any modifiers are down, OR
+	# 	#    the listview isn't editable, OR
+	# 	#    we should edit on double click and this is a single click, OR
+	# 	#    we should edit on single click and this is a double click,
+	# 	# THEN we don't try to start a cell edit operation
+	# 	if wx.VERSION > (2, 9, 1, 0):
+	# 		if evt.altDown or evt.controlDown or evt.shiftDown:
+	# 			return
+	# 	else:
+	# 		if evt.m_altDown or evt.m_controlDown or evt.m_shiftDown:
+	# 			return
+	# 	if self.cellEditMode == self.CELLEDIT_NONE:
+	# 		return
+	# 	if evt.LeftUp() and self.cellEditMode == self.CELLEDIT_DOUBLECLICK:
+	# 		return
+	# 	if evt.LeftDClick() and self.cellEditMode == self.CELLEDIT_SINGLECLICK:
+	# 		return
 
-		# Which item did the user click?
-		(rowIndex, flags, subItemIndex) = self.HitTestSubItem(
-			evt.GetPosition())
-		if (flags & wx.LIST_HITTEST_ONITEM) == 0 or subItemIndex == -1:
-			return
+	# 	# Which item did the user click?
+	# 	(rowIndex, flags, subItemIndex) = self.HitTestSubItem(
+	# 		evt.GetPosition())
+	# 	if (flags & wx.LIST_HITTEST_ONITEM) == 0 or subItemIndex == -1:
+	# 		return
 
-		# A single click on column 0 doesn't start an edit
-		if subItemIndex == 0 and self.cellEditMode == self.CELLEDIT_SINGLECLICK:
-			return
+	# 	# A single click on column 0 doesn't start an edit
+	# 	if subItemIndex == 0 and self.cellEditMode == self.CELLEDIT_SINGLECLICK:
+	# 		return
 
-		self._PossibleStartCellEdit(rowIndex, subItemIndex)
+	# 	self._PossibleStartCellEdit(rowIndex, subItemIndex)
 
-	def _HandleMouseWheel(self, evt):
-		"""
-		The user spun the mouse wheel
-		"""
-		self._PossibleFinishCellEdit()
-		evt.Skip()
+	# def _HandleMouseWheel(self, evt):
+	# 	"""
+	# 	The user spun the mouse wheel
+	# 	"""
+	# 	self._PossibleFinishCellEdit()
+	# 	evt.Skip()
 
-	def _HandleScroll(self, evt):
-		"""
-		The ListView is being scrolled
-		"""
-		self._PossibleFinishCellEdit()
-		evt.Skip()
+	# def _HandleScroll(self, evt):
+	# 	"""
+	# 	The ListView is being scrolled
+	# 	"""
+	# 	self._PossibleFinishCellEdit()
+	# 	evt.Skip()
 
 	def _HandleSize(self, evt):
 		"""
@@ -5860,34 +6016,34 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 											  sz.GetHeight())
 		self.stEmptyListMsg.Wrap(sz.GetWidth())
 
-	def _HandleTabKey(self, isShiftDown):
-		"""
-		Handle a Tab key during a cell edit operation
-		"""
-		(rowBeingEdited, subItem) = self.cellBeingEdited
+	# def _HandleTabKey(self, isShiftDown):
+	# 	"""
+	# 	Handle a Tab key during a cell edit operation
+	# 	"""
+	# 	(rowBeingEdited, subItem) = self.cellBeingEdited
 
-		# Prevent a nasty flicker when tabbing between fields where the selected rows
-		# are restored at the end of one cell edit, and removed at the start of
-		# the next
-		shadowSelection = self.selectionBeforeCellEdit
-		self.selectionBeforeCellEdit = []
-		self.FinishCellEdit()
+	# 	# Prevent a nasty flicker when tabbing between fields where the selected rows
+	# 	# are restored at the end of one cell edit, and removed at the start of
+	# 	# the next
+	# 	shadowSelection = self.selectionBeforeCellEdit
+	# 	self.selectionBeforeCellEdit = []
+	# 	self.FinishCellEdit()
 
-		# If we are in report view, move to the next (or previous) editable subitem,
-		# wrapping at the edges
-		if self.HasFlag(wx.LC_REPORT):
-			columnCount = self.GetColumnCount()
-			for ignored in range(columnCount - 1):
-				if isShiftDown:
-					subItem = (columnCount + subItem - 1) % columnCount
-				else:
-					subItem = (subItem + 1) % columnCount
-				if self.columns[subItem].isEditable and self.GetColumnWidth(
-						subItem) > 0:
-					self.StartCellEdit(rowBeingEdited, subItem)
-					break
+	# 	# If we are in report view, move to the next (or previous) editable subitem,
+	# 	# wrapping at the edges
+	# 	if self.HasFlag(wx.LC_REPORT):
+	# 		columnCount = self.GetColumnCount()
+	# 		for ignored in range(columnCount - 1):
+	# 			if isShiftDown:
+	# 				subItem = (columnCount + subItem - 1) % columnCount
+	# 			else:
+	# 				subItem = (subItem + 1) % columnCount
+	# 			if self.columns[subItem].isEditable and self.GetColumnWidth(
+	# 					subItem) > 0:
+	# 				self.StartCellEdit(rowBeingEdited, subItem)
+	# 				break
 
-		self.selectionBeforeCellEdit = shadowSelection
+	# 	self.selectionBeforeCellEdit = shadowSelection
 
 class DataColumnDefn(object):
 	"""
@@ -6254,20 +6410,19 @@ class DataColumnDefn(object):
 		global rendererCatalogue
 		_log("@DataColumnDefn.SetRenderer", renderer, args, kwargs)
 
-		mode = kwargs.pop("mode", wx.dataview.DATAVIEW_CELL_ACTIVATABLE)
-
 		try:
-			self.renderer = rendererCatalogue[renderer](*args, mode = mode, **kwargs)
+			self.renderer = rendererCatalogue[renderer](*args, **kwargs)
 		except AttributeError:
 			#https://github.com/wxWidgets/Phoenix/blob/master/samples/dataview/CustomRenderer.py
 			self.renderer = renderer
 
 #Utility Functions
 def _log(*data):
-	print(*data)
-	with open("log.txt", "a") as f:
-		f.write(f"{', '.join([f'{item}' for item in data])}\n")
-open('log.txt', 'w').close()
+	pass
+# 	print(*data)
+# 	with open("log.txt", "a") as f:
+# 		f.write(f"{', '.join([f'{item}' for item in data])}\n")
+# open('log.txt', 'w').close()
 
 def _StringToValue(value, converter):
 	"""
@@ -6552,6 +6707,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def __init__(self, olv):
 		wx.dataview.PyDataViewModel.__init__(self)
 		self.olv = olv
+		self.colorCatalogue = {}
 
 	#     # The PyDataViewModel derives from both DataViewModel and from
 	#     # DataViewItemObjectMapper, which has methods that help associate
@@ -6586,16 +6742,24 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 	def GetAttr(self, item, column, attribute):
 		#Override this to indicate that the item has special font attributes.
-		#This only affects the DataViewTextRendererText renderer.
 		#The base class version always simply returns False.
 		# _log("@model.GetAttr", item, column, attribute)
-		return super().GetAttr(item, column, attribute)
+		# return super().GetAttr(item, column, attribute)
 
-		##_log('GetAttr')
+		changed = False
 		node = self.ItemToObject(item)
-		if isinstance(node, Genre):
-			attr.SetColour('blue')
-			attr.SetBold(True)
+		if (id(node) in self.colorCatalogue):
+			attribute.SetBackgroundColour(self.colorCatalogue[id(node)])
+
+		if (isinstance(node, ListGroup)):
+			attribute.SetBold(self.olv.groupFont[0])
+			attribute.SetItalic(self.olv.groupFont[1])
+			attribute.SetColour(self.olv.groupFont[2])
+
+		if (self.olv.rowFormatter is not None):
+			self.olv.rowFormatter(item, node)
+
+		if (changed):
 			return True
 		return False
 
@@ -6603,6 +6767,21 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		#Override this so the control can query the child items of an item.
 		#Returns the number of items.
 		_log("@model.GetChildren", parent, children)#, self.olv.modelObjects, self.olv.groups)
+
+		def applyRowColor(rows):
+			if (self.olv.useAlternateBackColors and self.olv.InReportView()):
+				for index, row in enumerate(rows):
+					#Determine row color outside of virtual function for speed
+					if (index & 1):
+						self.colorCatalogue[id(row)] = self.olv.oddRowsBackColor
+					else:
+						self.colorCatalogue[id(row)] = self.olv.evenRowsBackColor
+
+		def applyGroupColor(group):
+			if (self.olv.useAlternateBackColors and self.olv.InReportView()):
+				if (self.olv.groupBackColor != None):
+					self.colorCatalogue[id(group)] = self.olv.groupBackColor
+				applyRowColor(group.modelObjects)
 
 		# The view calls this method to find the children of any node in the
 		# control. There is an implicit hidden root node, and the top level
@@ -6617,9 +6796,11 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		if not parent:
 			if (self.olv.showGroups):
 				for group in self.olv.groups:
+					applyGroupColor(group)
 					children.append(self.ObjectToItem(group))
 				return len(self.olv.groups)
 			else:
+				applyRowColor(self.olv.modelObjects)
 				for row in self.olv.modelObjects:
 					children.append(self.ObjectToItem(row))
 				return len(self.olv.modelObjects)
@@ -6628,6 +6809,8 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# item and make DV items for each of it's child objects.
 		node = self.ItemToObject(parent)
 		if isinstance(node, ListGroup):
+			applyGroupColor(node)
+			applyRowColor(node.modelObjects)
 			for row in node.modelObjects:
 				children.append(self.ObjectToItem(row))
 			return len(node.modelObjects)
@@ -6871,9 +7054,9 @@ class Renderer_MultiImage(wx.dataview.DataViewCustomRenderer):
 	Otherwise, *image* will be repeated n times, where n the value returned by *valueGetter* for the assigned *ColumnDefn*.
 	"""
 
-	def __init__(self, image, *args, **kwargs):
-		_log("@Renderer_MultiImage.__init__", args, kwargs)
-		wx.dataview.DataViewCustomRenderer.__init__(self, *args, **kwargs)
+	def __init__(self, image, mode = wx.dataview.DATAVIEW_CELL_ACTIVATABLE, **kwargs):
+		_log("@Renderer_MultiImage.__init__", kwargs)
+		wx.dataview.DataViewCustomRenderer.__init__(self, **kwargs)
 		
 		self.value = None
 		self.image = image
@@ -6957,6 +7140,16 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self.value()
 		return True
 
+class Renderer_CheckBox(wx.dataview.DataViewToggleRenderer):
+	"""
+	Changed the default behavior from Inert to Active.
+	"""
+
+	def __init__(self, text = "", mode = wx.dataview.DATAVIEW_CELL_ACTIVATABLE, **kwargs):
+		_log("@Renderer_CheckBox.__init__", text, mode, kwargs)
+
+		wx.dataview.DataViewCustomRenderer.__init__(self, mode = mode, **kwargs)
+
 rendererCatalogue = {
 	None:       wx.dataview.DataViewTextRenderer,
 	"text":     wx.dataview.DataViewTextRenderer,
@@ -6965,7 +7158,7 @@ rendererCatalogue = {
 	"spin":     wx.dataview.DataViewSpinRenderer,
 	"bmp":      wx.dataview.DataViewBitmapRenderer,
 	"icon":     wx.dataview.DataViewIconTextRenderer,
-	"radio":    wx.dataview.DataViewToggleRenderer,
+	"radio":     Renderer_CheckBox,
 	"multi_bmp": Renderer_MultiImage,
 	"button":    Renderer_Button,
 }
