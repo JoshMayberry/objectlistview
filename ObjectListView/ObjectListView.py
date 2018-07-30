@@ -4749,19 +4749,20 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		#Standard
 		self.columns = {}
 		self.modelObjects = []
+		self.colorOverride = {}
 
-		self.noHeader 					= kwargs.pop("noHeader", False)
-		self.rowFormatter 				= kwargs.pop("rowFormatter", None)
-		self.singleSelect 				= kwargs.pop("singleSelect", True)
-		self.verticalLines 				= kwargs.pop("verticalLines", False)
-		self.horizontalLines 			= kwargs.pop("horizontalLines", False)
+		self.noHeader 				= kwargs.pop("noHeader", False)
+		self.rowFormatter 			= kwargs.pop("rowFormatter", None)
+		self.singleSelect 			= kwargs.pop("singleSelect", True)
+		self.verticalLines 			= kwargs.pop("verticalLines", False)
+		self.horizontalLines 		= kwargs.pop("horizontalLines", False)
 		
-		self.groupBackColor				= kwargs.pop("groupBackColor", None)# wx.Colour(195, 144, 212))  # LIGHT MAGENTA
-		self.oddRowsBackColor			= kwargs.pop("oddRowsBackColor", wx.Colour(255, 250, 205))  # LEMON CHIFFON
-		self.evenRowsBackColor			= kwargs.pop("evenRowsBackColor", wx.Colour(240, 248, 255))  # ALICE BLUE
-		self.useAlternateBackColors 	= kwargs.pop("useAlternateBackColors", True)
-		self.backgroundColor 			= kwargs.pop("backgroundColor", None)
-		self.foregroundColor 			= kwargs.pop("foregroundColor", None)
+		self.groupBackColor			= kwargs.pop("groupBackColor", None)# wx.Colour(195, 144, 212))  # LIGHT MAGENTA
+		self.oddRowsBackColor		= kwargs.pop("oddRowsBackColor", wx.Colour(255, 250, 205))  # LEMON CHIFFON
+		self.evenRowsBackColor		= kwargs.pop("evenRowsBackColor", wx.Colour(240, 248, 255))  # ALICE BLUE
+		self.useAlternateBackColors = kwargs.pop("useAlternateBackColors", True)
+		self.backgroundColor 		= kwargs.pop("backgroundColor", None)
+		self.foregroundColor 		= kwargs.pop("foregroundColor", None)
 		
 		#Sorting
 		self.groups = []
@@ -4769,18 +4770,19 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		
 		self.filter 					= kwargs.pop("filter", None)
 		self.sortable 					= kwargs.pop("sortable", True)
+		self.caseSensative 				= kwargs.pop("caseSensative", True)
 		self.sortAscending				= kwargs.pop("sortAscending", True)
 		self.sortColumnIndex			= kwargs.pop("sortColumnIndex", -1)
-		self.defaultSortFunction		= kwargs.pop("defaultSortFunction", None)
+		self.compareFunction			= kwargs.pop("compareFunction", None)
+		self.groupCompareFunction 		= kwargs.pop("groupCompareFunction", None)
 		self.typingSearchesSortColumn	= kwargs.pop("typingSearchesSortColumn", True)
-		self.defaultGroupSortFunction	= kwargs.pop("defaultGroupSortFunction", None)
 
 		#Editing
 		self.cellEditor = None
 		self.cellBeingEdited = None
 		self.selectionBeforeCellEdit = []
 
-		self.cellEditMode 				= kwargs.pop("cellEditMode", self.CELLEDIT_NONE)
+		self.cellEditMode 	= kwargs.pop("cellEditMode", self.CELLEDIT_NONE)
 
 		#Searching
 		self.searchPrefix = u""
@@ -4802,8 +4804,8 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		#Etc
 		self.handleStandardKeys = True
-		emptyListMsg 					= kwargs.pop("emptyListMsg", "This list is empty")
-		emptyListFont 					= kwargs.pop("emptyListFont", wx.Font(24, wx.DEFAULT, wx.NORMAL, wx.NORMAL, 0, ""))
+		emptyListMsg 	= kwargs.pop("emptyListMsg", "This list is empty")
+		emptyListFont 	= kwargs.pop("emptyListFont", wx.Font(24, wx.DEFAULT, wx.NORMAL, wx.NORMAL, 0, ""))
 
 		#Setup Style
 		style = kwargs.pop("style", None) #Doe NOT pass in wx.LC_REPORT, or it will show doen A LOT
@@ -4890,6 +4892,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		_log("@DataObjectListView.SetColumns", columns, repopulate)
 		sortCol = self.GetSortColumn()
 		self.ClearAll()
+		self.ClearColumns()
 		# self.checkStateColumn = None
 		self.columns = {}
 		for x in columns:
@@ -4946,7 +4949,8 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewCtrl.html#wx.dataview.DataViewCtrl.AppendColumn
 		defn.column = wx.dataview.DataViewColumn(defn.title, defn.renderer, len(self.columns) - 1, 
 			width = defn.width, align = defn.GetAlignment(), flags = wx.dataview.DATAVIEW_COL_RESIZABLE)
-		
+		defn.SetSortable()
+
 		if (index):
 			self.InsertColumn(index, defn.column)
 		else:
@@ -4964,69 +4968,77 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		self.stEmptyListMsg.SetFont(font)
 
+	def SetBackgroundColour(self, model, color = None):
+		"""
+		Changes the background color for the specified model only.
+		If *color* is None, the default color will be used.
+		"""
+
+		if (color != None):
+			self.colorOverride[model] = color
+		elif (model in self.colorOverride):
+			del self.colorOverride[model]
+
+		# self.model.ItemChanged(model)
+		self.model.Cleared()
+
 	#-------------------------------------------------------------------------
 	# Accessing
 
-	def GetShowGroups(self):
-		"""
-		Return whether or not this control is showing groups of objects or a straight list
-		"""
-		return self.showGroups
+	def GetItemCount(self):
+		return len(self.modelObjects)
 
-	def GetPrimaryColumn(self):
-		"""
-		Return the primary column or None there is no primary column.
-
-		The primary column is the first column given by the user.
-		This column is edited when F2 is pressed.
-		"""
-		i = self.GetPrimaryColumnIndex()
-		if i == -1:
-			return None
-		else:
-			return self.columns[i]
-
-	def GetPrimaryColumnIndex(self):
-		"""
-		Return the index of the primary column. Returns -1 when there is no primary column.
-
-		The primary column is the first column given by the user.
-		This column is edited when F2 is pressed.
-		"""
-		for i, x in self.columns.items():
-			if not x.isInternal:
-				return i
-
-		return -1
-
+	#Selection Functions
 	def GetSelectedObject(self):
 		"""
 		Return the selected modelObject or None if nothing is selected or if more than one is selected.
 		"""
-		model = None
-		for (i, x) in enumerate(self.YieldSelectedObjects()):
-			if i == 0:
-				model = x
-			else:
-				model = None
-				break
-		return model
+		_log("@DataObjectListView.GetSelectedObject")
+		for model in self.YieldSelectedObjects():
+			return model
+		return None
 
 	def GetSelectedObjects(self):
 		"""
 		Return a list of the selected modelObjects
 		"""
+		_log("@DataObjectListView.GetSelectedObjects")
 		return list(self.YieldSelectedObjects())
 
-	def GetSortColumn(self):
+	def YieldSelectedObjects(self):
 		"""
-		Return the column by which the rows of this control should be sorted
+		Progressively yield the selected modelObjects
 		"""
-		if self.sortColumnIndex < 0 or self.sortColumnIndex >= len(
-				self.columns):
-			return None
-		else:
-			return self.columns[self.sortColumnIndex]
+		_log("@DataObjectListView.YieldSelectedObjects")
+
+		for item in self.GetSelections():
+			yield self.model.ItemToObject(item)
+
+	def IsObjectSelected(self, modelObject):
+		"""
+		Is the given modelObject selected?
+		"""
+		return modelObject in self.GetSelectedObjects()
+
+	def SetSelections(self, modelObjects):
+		self.UnselectAll()
+		for item in modelObjects:
+			self.Select(item)
+
+	def Select(self, modelObject):
+		item = self.model.ItemToObject(modelObject)
+		super().Select(item)
+
+	def Unselect(self, modelObject):
+		item = self.model.ItemToObject(modelObject)
+		super().Unselect(item)
+
+	#Show functions
+	def GetShowGroups(self):
+		"""
+		Return whether or not this control is showing groups of objects or a straight list
+		"""
+		return self.showGroups
 
 	def SetShowGroups(self, showGroups = True):
 		"""
@@ -5057,30 +5069,76 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Set whether or not the number of items in a groups should be included in the title
 		"""
-		if showItemCounts != self.showItemCounts:
+		if (showItemCounts != self.showItemCounts):
 			self.showItemCounts = showItemCounts
 			self._BuildGroupTitles(self.groups, self.GetGroupByColumn())
 			self._SetGroups(self.groups)
 
-	def GetGroupByColumn(self):
+	#Get column functions
+	def GetGroupByColumn(self, *args, **kwargs):
 		"""
 		Return the column by which the rows should be grouped
 		"""
 		if self.alwaysGroupByColumnIndex >= 0:
-			return self.GetAlwaysGroupByColumn()
-		elif self.GetSortColumn() is None:
-			return self.GetPrimaryColumn()
+			return self.GetAlwaysGroupByColumn(*args, **kwargs)
+		elif self.GetSortColumn(*args, **kwargs) is None:
+			return self.GetPrimaryColumn(*args, **kwargs)
 		else:
-			return self.GetSortColumn()
+			return self.GetSortColumn(*args, **kwargs)
 
-	def GetAlwaysGroupByColumn(self):
+	def GetPrimaryColumn(self, returnIndex = False):
+		"""
+		Return the primary column or None there is no primary column.
+
+		The primary column is the first column given by the user.
+		This column is edited when F2 is pressed.
+		"""
+		i = self.GetPrimaryColumnIndex()
+		if (i == -1):
+			return None
+		elif (returnIndex):
+			return i
+		else:
+			return self.columns[i]
+
+	def GetPrimaryColumnIndex(self):
+		"""
+		Return the index of the primary column. Returns -1 when there is no primary column.
+
+		The primary column is the first column given by the user.
+		This column is edited when F2 is pressed.
+		"""
+		for i, x in self.columns.items():
+			if (not x.isInternal):
+				return i
+		return -1
+
+	def GetSortColumn(self, returnIndex = False):
+		"""
+		Return the column by which the rows of this control should be sorted
+		"""
+		if self.sortColumnIndex < 0 or self.sortColumnIndex >= len(
+				self.columns):
+			return None
+		else:
+			if (returnIndex):
+				return self.sortColumnIndex
+			return self.columns[self.sortColumnIndex]
+
+	def GetAlwaysGroupByColumn(self, returnIndex = False):
 		"""
 		Get the column by which the rows should be always be grouped.
 		"""
 		if (self.alwaysGroupByColumnIndex == -1):
-			return self.columns[max([i for i in self.columns.keys() if (i is not None)])]
+			index = max([i for i in self.columns.keys() if (i is not None)])
+			if (returnIndex):
+				return index
+			return self.columns[index]
 		try:
-			return self.columns[self.alwaysGroupByColumnIndex]
+			column = self.columns[self.alwaysGroupByColumnIndex]
+			if (returnIndex):
+				return self.alwaysGroupByColumnIndex
+			return column
 		except KeyError:
 			return None
 
@@ -5231,6 +5289,10 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		If the cell is bigger than the ListView, the top left of the cell will be visible.
 		"""
+
+		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewCtrl.html#wx.dataview.DataViewCtrl.EnsureVisible
+		jhkjjkhkjkhjjk
+
 		self.EnsureVisible(rowIndex)
 		bounds = self.GetSubItemRect(
 			rowIndex,
@@ -5277,7 +5339,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			return
 
 		groups = self._BuildGroups()
-		self.SortGroups(groups)
+		# self.SortGroups(groups)
 		self._SetGroups(groups)
 
 	def _SetGroups(self, groups):
@@ -5369,550 +5431,463 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 	# ---Sorting-------------------------------------------------------#000000#FFFFFF
 
-	def _SortObjects(self, modelObjects=None, sortColumn=None, secondarySortColumn=None):
+	def EnableSorting(self, column = None, state = True):
 		"""
-		Sort the given modelObjects in place.
-
-		This does not change the information shown in the control itself.
+		Enable automatic sorting when the user clicks on a column title
+		If *column* is None, applies to all columns.
 		"""
-		if modelObjects is None:
-			modelObjects = self.modelObjects
-		if sortColumn is None:
-			sortColumn = self.GetSortColumn()
-		if secondarySortColumn == sortColumn:
-			secondarySortColumn = None
-
-		# If we don't have a sort column, we can't sort -- duhh
-		if sortColumn is None:
-			return
-
-		# Let the world have a chance to sort the model objects
-		evt = OLVEvent.SortEvent(
-			self,
-			self.sortColumnIndex,
-			self.sortAscending,
-			True)
-		self.GetEventHandler().ProcessEvent(evt)
-		if evt.IsVetoed() or evt.wasHandled:
-			return
-
-		# When sorting large groups, this is called a lot. Make it efficent.
-		# It is more efficient (by about 30%) to try to call lower() and catch the
-		# exception than it is to test for the class
-		def _getSortValue(x):
-			primary = sortColumn.GetValue(x)
-			try:
-				primary = primary.lower()
-			except AttributeError:
-				pass
-			if secondarySortColumn:
-				secondary = secondarySortColumn.GetValue(x)
-				try:
-					secondary = secondary.lower()
-				except AttributeError:
-					pass
-				return (primary is None, primary, secondary)
-			else:
-				return (primary is None, primary)
-
-		if (self.defaultSortFunction != None):
-			modelObjects.sort(key=self.defaultSortFunction, reverse=(not self.sortAscending))
+		_log("@DataObjectListView.EnableSorting")
+		if (column != None):
+			self.columns[column].SetSortable(state)
 		else:
-			modelObjects.sort(key=_getSortValue, reverse=(not self.sortAscending))
+			for column in self.columns.values():
+				column.SetSortable(state)
 
-		# Sorting invalidates our object map
-		self.objectToIndexMap = None
-
-	def SortGroups(self, groups=None, ascending=None):
+	def DisableSorting(self, column = None, state = True):
 		"""
-		Sort the given collection of groups in the given direction (defaults to ascending).
-
-		The model objects within each group will be sorted as well
+		Disable automatic sorting when the user clicks on a column title
+		If *column* is None, applies to all columns.
 		"""
-		if groups is None:
-			groups = self.groups
-		if ascending is None:
-			ascending = self.sortAscending
 
-		# If the groups are locked, we sort by the sort column, otherwise by the grouping column.
-		# The primary column is always used as a secondary sort key.
-		if self.GetAlwaysGroupByColumn():
-			sortCol = self.GetSortColumn()
-		else:
-			sortCol = self.GetGroupByColumn()
+		_log("@DataObjectListView.DisableSorting")
+		self.EnableSorting(column = column, state = not state)
 
-		# Let the world have a change to sort the items
-		evt = OLVEvent.SortGroupsEvent(self, groups, sortCol, ascending)
-		self.GetEventHandler().ProcessEvent(evt)
-		if evt.wasHandled:
-			return
-
-		# Sorting event wasn't handled, so we do the default sorting
-		def _getLowerCaseKey(group):
-			try:
-				return group.key.lower()
-			except:
-				return group.key
-
-		if (self.defaultGroupSortFunction == None):
-			sortFunction = _getLowerCaseKey
-		else:
-			sortFunction = self.defaultGroupSortFunction
-
-		if six.PY2:
-			groups.sort(key=sortFunction, reverse=(not ascending))
-		else:
-			groups = sorted(groups, key=sortFunction,
-							reverse=(not ascending))
-			# update self.groups which is used e.g. in _SetGroups
-			self.groups = groups
-
-		# Sort the model objects within each group.
-		for x in groups:
-			self._SortObjects(x.modelObjects, sortCol, self.GetPrimaryColumn())
-
-	def _SortItemsNow(self):
+	def SortBy(self, newColumnIndex, ascending = True):
 		"""
-		Sort the items by our current settings.
-
-		GroupListViews don't sort the items directly. We have to sort the groups
-		and then rebuild the list.
+		Sort the items by the given column
 		"""
-		if not self.showGroups:
-			return FastObjectListView._SortItemsNow(self)
-
-		if self.groups is None:
-			self.groups = self._BuildGroups()
-		self.SortGroups(self.groups)
-		self._SetGroups(self.groups)
+		_log("@DataObjectListView.SortBy", newColumnIndex, ascending)
+		self.sortColumnIndex = newColumnIndex
+		self.sortAscending = ascending
+		self.model.Resort()
 
 	#Editing
-	def _PossibleStartCellEdit(self, rowIndex, subItemIndex):
-		"""
-		Start an edit operation on the given cell after performing some sanity checks
-		"""
-		return
-		# if 0 > rowIndex >= self.GetItemCount():
-		# 	return
+	# def _PossibleStartCellEdit(self, rowIndex, subItemIndex):
+	# 	"""
+	# 	Start an edit operation on the given cell after performing some sanity checks
+	# 	"""
+	# 	return
+	# 	# if 0 > rowIndex >= self.GetItemCount():
+	# 	# 	return
 
-		# if 0 > subItemIndex >= self.GetColumnCount():
-		# 	return
+	# 	# if 0 > subItemIndex >= self.GetColumnCount():
+	# 	# 	return
 
-		# if self.cellEditMode == self.CELLEDIT_NONE:
-		# 	return
+	# 	# if self.cellEditMode == self.CELLEDIT_NONE:
+	# 	# 	return
 
-		# if not self.columns[subItemIndex].isEditable:
-		# 	return
+	# 	# if not self.columns[subItemIndex].isEditable:
+	# 	# 	return
 
-		# if self.GetObjectAt(rowIndex) is None:
-		# 	return
+	# 	# if self.GetObjectAt(rowIndex) is None:
+	# 	# 	return
 
-		# self.StartCellEdit(rowIndex, subItemIndex)
+	# 	# self.StartCellEdit(rowIndex, subItemIndex)
 
-	def _PossibleFinishCellEdit(self):
-		"""
-		If a cell is being edited, finish and commit an edit operation on the given cell.
-		"""
-		return
-		# if self.IsCellEditing():
-		# 	self.FinishCellEdit()
+	# def _PossibleFinishCellEdit(self):
+	# 	"""
+	# 	If a cell is being edited, finish and commit an edit operation on the given cell.
+	# 	"""
+	# 	return
+	# 	# if self.IsCellEditing():
+	# 	# 	self.FinishCellEdit()
 
-	def _PossibleCancelCellEdit(self):
-		"""
-		If a cell is being edited, cancel the edit operation.
-		"""
-		return
-		# if self.IsCellEditing():
-		# 	self.CancelCellEdit()
+	# def _PossibleCancelCellEdit(self):
+	# 	"""
+	# 	If a cell is being edited, cancel the edit operation.
+	# 	"""
+	# 	return
+	# 	# if self.IsCellEditing():
+	# 	# 	self.CancelCellEdit()
 
 	#-------------------------------------------------------------------------
 	# Calculating
 
-	def GetSubItemRect(self, rowIndex, subItemIndex, flag):
-		"""
-		Poor mans replacement for missing wxWindows method.
+	# def GetSubItemRect(self, rowIndex, subItemIndex, flag):
+	# 	"""
+	# 	Poor mans replacement for missing wxWindows method.
 
-		The rect returned takes scroll position into account, so negative x and y are
-		possible.
-		"""
-		_log("@DataObjectListView.GetSubItemRect", rowIndex, subItemIndex, flag)
-		# Linux doesn't handle wx.LIST_RECT_LABEL flag. So we always get
-		# the whole bounds then par it down to the cell we want
-		rect = self.GetItemRect(rowIndex, wx.LIST_RECT_BOUNDS)
+	# 	The rect returned takes scroll position into account, so negative x and y are
+	# 	possible.
+	# 	"""
+	# 	_log("@DataObjectListView.GetSubItemRect", rowIndex, subItemIndex, flag)
+	# 	# Linux doesn't handle wx.LIST_RECT_LABEL flag. So we always get
+	# 	# the whole bounds then par it down to the cell we want
+	# 	rect = self.GetItemRect(rowIndex, wx.LIST_RECT_BOUNDS)
 
-		if (self.InReportView()):
-			rect = [0 - self.GetScrollPos( wx.HORIZONTAL),
-				rect.Y,
-				0,
-				rect.Height]
-			for i in range(subItemIndex + 1):
-				rect[0] += rect[2]
-				rect[2] = self.GetColumnWidth(i)
+	# 	if (self.InReportView()):
+	# 		rect = [0 - self.GetScrollPos( wx.HORIZONTAL),
+	# 			rect.Y,
+	# 			0,
+	# 			rect.Height]
+	# 		for i in range(subItemIndex + 1):
+	# 			rect[0] += rect[2]
+	# 			rect[2] = self.GetColumnWidth(i)
 
-		# If we want only the label rect for sub items, we have to manually
-		# adjust for any image the subitem might have
-		if flag == wx.LIST_RECT_LABEL:
-			lvi = self.GetItem(rowIndex, subItemIndex)
-			if (lvi.GetImage() != -1):
-				if( self.HasFlag(wx.LC_ICON)):
-					imageWidth = self.normalImageList.GetSize(0)[0]
-					rect[1] += imageWidth
-					rect[3] -= imageWidth
-				else:
-					imageWidth = self.smallImageList.GetSize(0)[0] + 1
-					rect[0] += imageWidth
-					rect[2] -= imageWidth
+	# 	# If we want only the label rect for sub items, we have to manually
+	# 	# adjust for any image the subitem might have
+	# 	if flag == wx.LIST_RECT_LABEL:
+	# 		lvi = self.GetItem(rowIndex, subItemIndex)
+	# 		if (lvi.GetImage() != -1):
+	# 			if( self.HasFlag(wx.LC_ICON)):
+	# 				imageWidth = self.normalImageList.GetSize(0)[0]
+	# 				rect[1] += imageWidth
+	# 				rect[3] -= imageWidth
+	# 			else:
+	# 				imageWidth = self.smallImageList.GetSize(0)[0] + 1
+	# 				rect[0] += imageWidth
+	# 				rect[2] -= imageWidth
 
-		# log "rect=%s" % rect
-		return rect
+	# 	# log "rect=%s" % rect
+	# 	return rect
 
-	def HitTestSubItem(self, pt):
-		"""
-		Return a tuple indicating which (item, subItem) the given pt (client coordinates) is over.
+	# def HitTestSubItem(self, pt):
+	# 	"""
+	# 	Return a tuple indicating which (item, subItem) the given pt (client coordinates) is over.
 
-		This uses the buildin version on Windows, and poor mans replacement on other platforms.
-		"""
-		_log("@DataObjectListView.HitTestSubItem", pt)
-		# The buildin version works on Windows
-		if (wx.Platform == "__WXMSW__"):
-			return wx.ListCtrl.HitTestSubItem(self, pt)
+	# 	This uses the buildin version on Windows, and poor mans replacement on other platforms.
+	# 	"""
+	# 	_log("@DataObjectListView.HitTestSubItem", pt)
+	# 	# The buildin version works on Windows
+	# 	if (wx.Platform == "__WXMSW__"):
+	# 		return wx.ListCtrl.HitTestSubItem(self, pt)
 
-		(rowIndex, flags) = self.HitTest(pt)
+	# 	(rowIndex, flags) = self.HitTest(pt)
 
-		# Did the point hit any item?
-		if (flags & wx.LIST_HITTEST_ONITEM) == 0:
-			return (-1, 0, -1)
+	# 	# Did the point hit any item?
+	# 	if (flags & wx.LIST_HITTEST_ONITEM) == 0:
+	# 		return (-1, 0, -1)
 
-		# If it did hit an item and we are not in report mode, it must be the
-		# primary cell
-		if (not self.InReportView()):
-			return (rowIndex, wx.LIST_HITTEST_ONITEM, 0)
+	# 	# If it did hit an item and we are not in report mode, it must be the
+	# 	# primary cell
+	# 	if (not self.InReportView()):
+	# 		return (rowIndex, wx.LIST_HITTEST_ONITEM, 0)
 
-		# Find which subitem is hit
-		right = 0
-		scrolledX = self.GetScrollPos(wx.HORIZONTAL) + pt.x
-		for i, col in self.columns.items():
-			left = right
-			right += col.column.GetWidth()
-			if (scrolledX < right):
-				flag = wx.LIST_HITTEST_ONITEMLABEL
-				# if (scrolledX - left) < self.smallImageList.GetSize(0)[0]:
-				# 	flag = wx.LIST_HITTEST_ONITEMICON
-				# else:
-				# 	flag = wx.LIST_HITTEST_ONITEMLABEL
-				return (rowIndex, flag, i)
+	# 	# Find which subitem is hit
+	# 	right = 0
+	# 	scrolledX = self.GetScrollPos(wx.HORIZONTAL) + pt.x
+	# 	for i, col in self.columns.items():
+	# 		left = right
+	# 		right += col.column.GetWidth()
+	# 		if (scrolledX < right):
+	# 			flag = wx.LIST_HITTEST_ONITEMLABEL
+	# 			# if (scrolledX - left) < self.smallImageList.GetSize(0)[0]:
+	# 			# 	flag = wx.LIST_HITTEST_ONITEMICON
+	# 			# else:
+	# 			# 	flag = wx.LIST_HITTEST_ONITEMLABEL
+	# 			return (rowIndex, flag, i)
 
-		return (rowIndex, 0, -1)
+	# 	return (rowIndex, 0, -1)
 
 
 	# ----------------------------------------------------------------------
 	# Utilities
 
-	def _IsPrintable(self, char):
-		"""
-		Check if char is printable using unicodedata as string.isPrintable
-		is only available in Py3.
-		"""
-		cat = unicodedata.category(char)
-		if cat[0] == "L":
-			return True
-		else:
-			return False
+	# def _IsPrintable(self, char):
+	# 	"""
+	# 	Check if char is printable using unicodedata as string.isPrintable
+	# 	is only available in Py3.
+	# 	"""
+	# 	cat = unicodedata.category(char)
+	# 	if cat[0] == "L":
+	# 		return True
+	# 	else:
+	# 		return False
 
-	#-------------------------------------------------------------------------
-	# Event handling
+	# #-------------------------------------------------------------------------
+	# # Event handling
 
-	def _HandleChar(self, evt):
-		if evt.GetKeyCode() == wx.WXK_F2 and not self.IsCellEditing():
-			return self._PossibleStartCellEdit(
-				self.GetFocusedRow(),
-				self.GetPrimaryColumnIndex())
+	# def _HandleChar(self, evt):
+	# 	if evt.GetKeyCode() == wx.WXK_F2 and not self.IsCellEditing():
+	# 		return self._PossibleStartCellEdit(
+	# 			self.GetFocusedRow(),
+	# 			self.GetPrimaryColumnIndex())
 
-		# We have to catch Return/Enter/Escape here since some types of controls
-		# (e.g. ComboBox, UserControl) don't trigger key events that we can listen for.
-		# Treat Return or Enter as committing the current edit operation unless the control
-		# is a multiline text control, in which case we treat it as data
-		if evt.GetKeyCode() in (
-				wx.WXK_RETURN,
-				wx.WXK_NUMPAD_ENTER) and self.IsCellEditing():
-			if self.cellEditor and self.cellEditor.HasFlag(wx.TE_MULTILINE):
-				return evt.Skip()
-			else:
-				return self.FinishCellEdit()
+	# 	# We have to catch Return/Enter/Escape here since some types of controls
+	# 	# (e.g. ComboBox, UserControl) don't trigger key events that we can listen for.
+	# 	# Treat Return or Enter as committing the current edit operation unless the control
+	# 	# is a multiline text control, in which case we treat it as data
+	# 	if evt.GetKeyCode() in (
+	# 			wx.WXK_RETURN,
+	# 			wx.WXK_NUMPAD_ENTER) and self.IsCellEditing():
+	# 		if self.cellEditor and self.cellEditor.HasFlag(wx.TE_MULTILINE):
+	# 			return evt.Skip()
+	# 		else:
+	# 			return self.FinishCellEdit()
 
-		# Treat Escape as cancel the current edit operation
-		if evt.GetKeyCode() in (
-				wx.WXK_ESCAPE,
-				wx.WXK_CANCEL) and self.IsCellEditing():
-			return self.CancelCellEdit()
+	# 	# Treat Escape as cancel the current edit operation
+	# 	if evt.GetKeyCode() in (
+	# 			wx.WXK_ESCAPE,
+	# 			wx.WXK_CANCEL) and self.IsCellEditing():
+	# 		return self.CancelCellEdit()
 
-		# Tab to the next editable column
-		if evt.GetKeyCode() == wx.WXK_TAB and self.IsCellEditing():
-			return self._HandleTabKey(evt.ShiftDown())
+	# 	# Tab to the next editable column
+	# 	if evt.GetKeyCode() == wx.WXK_TAB and self.IsCellEditing():
+	# 		return self._HandleTabKey(evt.ShiftDown())
 
-		# Space bar with a selection on a listview with checkboxes toggles the
-		# checkboxes
-		if (evt.GetKeyCode() == wx.WXK_SPACE and
-				not self.IsCellEditing() and
-				self.checkStateColumn is not None and
-				self.GetSelectedItemCount() > 0):
-			return self._ToggleCheckBoxForSelection()
+	# 	# Space bar with a selection on a listview with checkboxes toggles the
+	# 	# checkboxes
+	# 	if (evt.GetKeyCode() == wx.WXK_SPACE and
+	# 			not self.IsCellEditing() and
+	# 			self.checkStateColumn is not None and
+	# 			self.GetSelectedItemCount() > 0):
+	# 		return self._ToggleCheckBoxForSelection()
 
-		if not self.IsCellEditing():
-			if self._HandleTypingEvent(evt):
-				return
+	# 	if not self.IsCellEditing():
+	# 		if self._HandleTypingEvent(evt):
+	# 			return
 
-		if not self.IsCellEditing() and self.handleStandardKeys:
-			# Copy selection on Ctrl-C
-			# Why is Ctrl-C represented by 3?! Is this Windows only?
-			if (evt.GetKeyCode() == 3):
-				self.CopySelectionToClipboard()
-				return
-			# Select All on Ctrl-A
-			if (evt.GetKeyCode() == 1):
-				self.SelectAll()
-				return
+	# 	if not self.IsCellEditing() and self.handleStandardKeys:
+	# 		# Copy selection on Ctrl-C
+	# 		# Why is Ctrl-C represented by 3?! Is this Windows only?
+	# 		if (evt.GetKeyCode() == 3):
+	# 			self.CopySelectionToClipboard()
+	# 			return
+	# 		# Select All on Ctrl-A
+	# 		if (evt.GetKeyCode() == 1):
+	# 			self.SelectAll()
+	# 			return
 
-		evt.Skip()
+	# 	evt.Skip()
 
-	def _HandleTypingEvent(self, evt):
-		"""
-		"""
-		if self.GetItemCount() == 0 or self.GetColumnCount() == 0:
-			return False
+	# def _HandleTypingEvent(self, evt):
+	# 	"""
+	# 	"""
+	# 	if self.GetItemCount() == 0 or self.GetColumnCount() == 0:
+	# 		return False
 
-		if evt.GetModifiers() != 0 and evt.GetModifiers() != wx.MOD_SHIFT:
-			return False
+	# 	if evt.GetModifiers() != 0 and evt.GetModifiers() != wx.MOD_SHIFT:
+	# 		return False
 
-		if evt.GetKeyCode() > wx.WXK_START:
-			return False
+	# 	if evt.GetKeyCode() > wx.WXK_START:
+	# 		return False
 
-		if evt.GetKeyCode() in (wx.WXK_BACK, wx.WXK_DELETE):
-			self.searchPrefix = u""
-			return True
+	# 	if evt.GetKeyCode() in (wx.WXK_BACK, wx.WXK_DELETE):
+	# 		self.searchPrefix = u""
+	# 		return True
 
-		# On which column are we going to compare values? If we should search on the
-		# sorted column, and there is a sorted column and it is searchable, we use that
-		# one, otherwise we fallback to the primary column
-		if self.typingSearchesSortColumn and self.GetSortColumn(
-		) and self.GetSortColumn().isSearchable:
-			searchColumn = self.GetSortColumn()
-		else:
-			searchColumn = self.GetPrimaryColumn()
+	# 	# On which column are we going to compare values? If we should search on the
+	# 	# sorted column, and there is a sorted column and it is searchable, we use that
+	# 	# one, otherwise we fallback to the primary column
+	# 	if self.typingSearchesSortColumn and self.GetSortColumn(
+	# 	) and self.GetSortColumn().isSearchable:
+	# 		searchColumn = self.GetSortColumn()
+	# 	else:
+	# 		searchColumn = self.GetPrimaryColumn()
 
-		# On Linux, GetUnicodeKey() always returns 0 -- on my 2.8.7.1
-		# (gtk2-unicode)
-		uniKey = evt.UnicodeKey
-		if uniKey == 0:
-			uniChar = six.unichr(evt.KeyCode)
-		else:
-			# on some versions of wxPython UnicodeKey returns the character
-			# on others it is an integer
-			if isinstance(uniKey, int):
-				uniChar = six.unichr(uniKey)
-			else:
-				uniChar = uniKey
-		if not self._IsPrintable(uniChar):
-			return False
+	# 	# On Linux, GetUnicodeKey() always returns 0 -- on my 2.8.7.1
+	# 	# (gtk2-unicode)
+	# 	uniKey = evt.UnicodeKey
+	# 	if uniKey == 0:
+	# 		uniChar = six.unichr(evt.KeyCode)
+	# 	else:
+	# 		# on some versions of wxPython UnicodeKey returns the character
+	# 		# on others it is an integer
+	# 		if isinstance(uniKey, int):
+	# 			uniChar = six.unichr(uniKey)
+	# 		else:
+	# 			uniChar = uniKey
+	# 	if not self._IsPrintable(uniChar):
+	# 		return False
 
-		# On Linux, evt.GetTimestamp() isn't reliable so use time.time()
-		# instead
-		timeNow = time.time()
-		if (timeNow - self.whenLastTypingEvent) > self.SEARCH_KEYSTROKE_DELAY:
-			self.searchPrefix = uniChar
-		else:
-			self.searchPrefix += uniChar
-		self.whenLastTypingEvent = timeNow
+	# 	# On Linux, evt.GetTimestamp() isn't reliable so use time.time()
+	# 	# instead
+	# 	timeNow = time.time()
+	# 	if (timeNow - self.whenLastTypingEvent) > self.SEARCH_KEYSTROKE_DELAY:
+	# 		self.searchPrefix = uniChar
+	# 	else:
+	# 		self.searchPrefix += uniChar
+	# 	self.whenLastTypingEvent = timeNow
 
-		#self.__rows = 0
-		self._FindByTyping(searchColumn, self.searchPrefix)
-		# log "Considered %d rows in %2f secs" % (self.__rows, time.time() -
-		# timeNow)
+	# 	#self.__rows = 0
+	# 	self._FindByTyping(searchColumn, self.searchPrefix)
+	# 	# log "Considered %d rows in %2f secs" % (self.__rows, time.time() -
+	# 	# timeNow)
 
-		return True
+	# 	return True
 
-	def _FindByTyping(self, searchColumn, prefix):
-		"""
-		Select the first row passed the currently focused row that has a string representation
-		that begins with 'prefix' in the given column
-		"""
-		start = max(self.GetFocusedRow(), 0)
+	# def _FindByTyping(self, searchColumn, prefix):
+	# 	"""
+	# 	Select the first row passed the currently focused row that has a string representation
+	# 	that begins with 'prefix' in the given column
+	# 	"""
+	# 	start = max(self.GetFocusedRow(), 0)
 
-		# If the user is starting a new search, we don't want to consider the
-		# current row
-		if len(prefix) == 1:
-			start = (start + 1) % self.GetItemCount()
+	# 	# If the user is starting a new search, we don't want to consider the
+	# 	# current row
+	# 	if len(prefix) == 1:
+	# 		start = (start + 1) % self.GetItemCount()
 
-		# If we are searching on a sorted column, use a binary search
-		if self._CanUseBisect(searchColumn):
-			if self._FindByBisect(
-					searchColumn,
-					prefix,
-					start,
-					self.GetItemCount()):
-				return
-			if self._FindByBisect(searchColumn, prefix, 0, start):
-				return
-		else:
-			# A binary search on a sorted column can handle any number of rows. A linear
-			# search cannot. So we impose an arbitrary limit on the number of rows to
-			# consider. Above that, we don't even try
-			if self.GetItemCount() > self.MAX_ROWS_FOR_UNSORTED_SEARCH:
-				self._SelectAndFocus(0)
-				return
+	# 	# If we are searching on a sorted column, use a binary search
+	# 	if self._CanUseBisect(searchColumn):
+	# 		if self._FindByBisect(
+	# 				searchColumn,
+	# 				prefix,
+	# 				start,
+	# 				self.GetItemCount()):
+	# 			return
+	# 		if self._FindByBisect(searchColumn, prefix, 0, start):
+	# 			return
+	# 	else:
+	# 		# A binary search on a sorted column can handle any number of rows. A linear
+	# 		# search cannot. So we impose an arbitrary limit on the number of rows to
+	# 		# consider. Above that, we don't even try
+	# 		if self.GetItemCount() > self.MAX_ROWS_FOR_UNSORTED_SEARCH:
+	# 			self._SelectAndFocus(0)
+	# 			return
 
-			# Do a linear, wrapping search to find the next match. To wrap, we consider
-			# the rows in two partitions: start to the end of the collection, and then
-			# from the beginning to the start position. Expressing this in other languages
-			# is a pain, but it's elegant in Python. I just love Python :)
-			for i in itertools.chain(range(start, self.GetItemCount()), range(0, start)):
-				#self.__rows += 1
-				model = self.GetObjectAt(i)
-				if model is not None:
-					strValue = searchColumn.GetStringValue(model)
-					if strValue.lower().startswith(prefix):
-						self._SelectAndFocus(i)
-						return
-		wx.Bell()
+	# 		# Do a linear, wrapping search to find the next match. To wrap, we consider
+	# 		# the rows in two partitions: start to the end of the collection, and then
+	# 		# from the beginning to the start position. Expressing this in other languages
+	# 		# is a pain, but it's elegant in Python. I just love Python :)
+	# 		for i in itertools.chain(range(start, self.GetItemCount()), range(0, start)):
+	# 			#self.__rows += 1
+	# 			model = self.GetObjectAt(i)
+	# 			if model is not None:
+	# 				strValue = searchColumn.GetStringValue(model)
+	# 				if strValue.lower().startswith(prefix):
+	# 					self._SelectAndFocus(i)
+	# 					return
+	# 	wx.Bell()
 
-	def _CanUseBisect(self, searchColumn):
-		"""
-		Return True if we can use binary search on the given column
-		"""
-		# If the list isn't sorted or if it's sorted by some other column, we
-		# can't
-		if self.GetSortColumn() != searchColumn:
-			return False
+	# def _CanUseBisect(self, searchColumn):
+	# 	"""
+	# 	Return True if we can use binary search on the given column
+	# 	"""
+	# 	# If the list isn't sorted or if it's sorted by some other column, we
+	# 	# can't
+	# 	if self.GetSortColumn() != searchColumn:
+	# 		return False
 
-		# If the column doesn't knows whether it should or not, make a guess based on the
-		# type of data in the column (strings and booleans are probably safe). We already
-		# know that the list isn't empty.
-		if searchColumn.useBinarySearch is None:
-			aspect = searchColumn.GetValue(self.GetObjectAt(0))
-			searchColumn.useBinarySearch = isinstance(
-				aspect, (six.string_types, bool))
+	# 	# If the column doesn't knows whether it should or not, make a guess based on the
+	# 	# type of data in the column (strings and booleans are probably safe). We already
+	# 	# know that the list isn't empty.
+	# 	if searchColumn.useBinarySearch is None:
+	# 		aspect = searchColumn.GetValue(self.GetObjectAt(0))
+	# 		searchColumn.useBinarySearch = isinstance(
+	# 			aspect, (six.string_types, bool))
 
-		return searchColumn.useBinarySearch
+	# 	return searchColumn.useBinarySearch
 
-	def _FindByBisect(self, searchColumn, prefix, start, end):
-		"""
-		Use a binary search to look for rows that match the given prefix between the rows given.
+	# def _FindByBisect(self, searchColumn, prefix, start, end):
+	# 	"""
+	# 	Use a binary search to look for rows that match the given prefix between the rows given.
 
-		If a match was found, select/focus/reveal that row and return True.
-		"""
+	# 	If a match was found, select/focus/reveal that row and return True.
+	# 	"""
 
-		# If the sorting is ascending, we use less than to find the first match
-		# If the sort is descending, we have to use greater-equal, and suffix the
-		# search string to make sure we find the first match (without the suffix
-		# we always find the last match)
-		if self.sortAscending:
-			cmpFunc = operator.lt
-			searchFor = prefix
-		else:
-			cmpFunc = operator.ge
-			searchFor = prefix + "z"
+	# 	# If the sorting is ascending, we use less than to find the first match
+	# 	# If the sort is descending, we have to use greater-equal, and suffix the
+	# 	# search string to make sure we find the first match (without the suffix
+	# 	# we always find the last match)
+	# 	if self.sortAscending:
+	# 		cmpFunc = operator.lt
+	# 		searchFor = prefix
+	# 	else:
+	# 		cmpFunc = operator.ge
+	# 		searchFor = prefix + "z"
 
-		# Adapted from bisect std module
-		lo = start
-		hi = end
-		while lo < hi:
-			mid = (lo + hi) // 2
-			strValue = searchColumn.GetStringValue(self.GetObjectAt(mid))
-			if cmpFunc(searchFor, strValue.lower()):
-				hi = mid
-			else:
-				lo = mid + 1
+	# 	# Adapted from bisect std module
+	# 	lo = start
+	# 	hi = end
+	# 	while lo < hi:
+	# 		mid = (lo + hi) // 2
+	# 		strValue = searchColumn.GetStringValue(self.GetObjectAt(mid))
+	# 		if cmpFunc(searchFor, strValue.lower()):
+	# 			hi = mid
+	# 		else:
+	# 			lo = mid + 1
 
-		if lo < start or lo >= end:
-			return False
+	# 	if lo < start or lo >= end:
+	# 		return False
 
-		strValue = searchColumn.GetStringValue(self.GetObjectAt(lo))
-		if strValue.lower().startswith(prefix):
-			self._SelectAndFocus(lo)
-			return True
+	# 	strValue = searchColumn.GetStringValue(self.GetObjectAt(lo))
+	# 	if strValue.lower().startswith(prefix):
+	# 		self._SelectAndFocus(lo)
+	# 		return True
 
-		return False
+	# 	return False
 
-	def _SelectAndFocus(self, rowIndex):
-		"""
-		Select and focus on the given row.
-		"""
-		self.DeselectAll()
-		self.Select(rowIndex)
-		self.Focus(rowIndex)
+	# def _SelectAndFocus(self, rowIndex):
+	# 	"""
+	# 	Select and focus on the given row.
+	# 	"""
+	# 	self.DeselectAll()
+	# 	self.Select(rowIndex)
+	# 	self.Focus(rowIndex)
 
-	def _ToggleCheckBoxForSelection(self):
-		"""
-		Toggles the checkedness of the selected modelObjects.
-		"""
-		selection = self.GetSelectedObjects()
-		if not selection:
-			return
-		newValue = not self.IsChecked(selection[0])
-		for x in selection:
-			self.SetCheckState(x, newValue)
-		self.RefreshObjects(selection)
+	# def _ToggleCheckBoxForSelection(self):
+	# 	"""
+	# 	Toggles the checkedness of the selected modelObjects.
+	# 	"""
+	# 	selection = self.GetSelectedObjects()
+	# 	if not selection:
+	# 		return
+	# 	newValue = not self.IsChecked(selection[0])
+	# 	for x in selection:
+	# 		self.SetCheckState(x, newValue)
+	# 	self.RefreshObjects(selection)
 
-	def _HandleColumnBeginDrag(self, evt):
-		"""
-		Handle when the user begins to resize a column
-		"""
-		self._PossibleFinishCellEdit()
-		colIndex = evt.GetColumn()
-		if 0 > colIndex >= len(self.columns):
-			evt.Skip()
-		else:
-			col = self.columns[colIndex]
-			if col.IsFixedWidth() or col.isSpaceFilling:
-				evt.Veto()
-			else:
-				evt.Skip()
+	# def _HandleColumnBeginDrag(self, evt):
+	# 	"""
+	# 	Handle when the user begins to resize a column
+	# 	"""
+	# 	self._PossibleFinishCellEdit()
+	# 	colIndex = evt.GetColumn()
+	# 	if 0 > colIndex >= len(self.columns):
+	# 		evt.Skip()
+	# 	else:
+	# 		col = self.columns[colIndex]
+	# 		if col.IsFixedWidth() or col.isSpaceFilling:
+	# 			evt.Veto()
+	# 		else:
+	# 			evt.Skip()
 
-	def _HandleColumnClick(self, evt):
-		"""
-		The user has clicked on a column title
-		"""
-		evt.Skip()
-		self._PossibleFinishCellEdit()
+	# def _HandleColumnClick(self, evt):
+	# 	"""
+	# 	The user has clicked on a column title
+	# 	"""
+	# 	evt.Skip()
+	# 	self._PossibleFinishCellEdit()
 
-		# Toggle the sort column on the second click
-		if evt.GetColumn() == self.sortColumnIndex:
-			self.sortAscending = not self.sortAscending
-		else:
-			self.sortAscending = True
+	# 	# Toggle the sort column on the second click
+	# 	if evt.GetColumn() == self.sortColumnIndex:
+	# 		self.sortAscending = not self.sortAscending
+	# 	else:
+	# 		self.sortAscending = True
 
-		self.SortBy(evt.GetColumn(), self.sortAscending)
+	# 	self.SortBy(evt.GetColumn(), self.sortAscending)
 
-	def _HandleColumnDragging(self, evt):
-		"""
-		A column is being dragged
-		"""
-		# When is this triggered?
+	# def _HandleColumnDragging(self, evt):
+	# 	"""
+	# 	A column is being dragged
+	# 	"""
+	# 	# When is this triggered?
 
-		# The processing should be the same processing as Dragged
-		evt.Skip()
+	# 	# The processing should be the same processing as Dragged
+	# 	evt.Skip()
 
-	def _HandleColumnEndDrag(self, evt):
-		"""
-		The user has finished resizing a column. Make sure that it is not
-		bigger than it should be, then resize any space filling columns.
-		"""
-		colIndex = evt.GetColumn()
-		if 0 > colIndex >= len(self.columns):
-			evt.Skip()
-		else:
-			currentWidth = self.GetColumnWidth(colIndex)
-			col = self.columns[colIndex]
-			newWidth = col.CalcBoundedWidth(currentWidth)
-			if currentWidth != newWidth:
-				wx.CallAfter(self._SetColumnWidthAndResize, colIndex, newWidth)
-			else:
-				evt.Skip()
-				wx.CallAfter(self._ResizeSpaceFillingColumns)
+	# def _HandleColumnEndDrag(self, evt):
+	# 	"""
+	# 	The user has finished resizing a column. Make sure that it is not
+	# 	bigger than it should be, then resize any space filling columns.
+	# 	"""
+	# 	colIndex = evt.GetColumn()
+	# 	if 0 > colIndex >= len(self.columns):
+	# 		evt.Skip()
+	# 	else:
+	# 		currentWidth = self.GetColumnWidth(colIndex)
+	# 		col = self.columns[colIndex]
+	# 		newWidth = col.CalcBoundedWidth(currentWidth)
+	# 		if currentWidth != newWidth:
+	# 			wx.CallAfter(self._SetColumnWidthAndResize, colIndex, newWidth)
+	# 		else:
+	# 			evt.Skip()
+	# 			wx.CallAfter(self._ResizeSpaceFillingColumns)
 
-	def _SetColumnWidthAndResize(self, colIndex, newWidth):
-		self.SetColumnWidth(colIndex, newWidth)
-		self._ResizeSpaceFillingColumns()
+	# def _SetColumnWidthAndResize(self, colIndex, newWidth):
+	# 	self.SetColumnWidth(colIndex, newWidth)
+	# 	self._ResizeSpaceFillingColumns()
 
 	# def _HandleLeftDown(self, evt):
 	# 	"""
@@ -5996,13 +5971,13 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	# 	self._PossibleFinishCellEdit()
 	# 	evt.Skip()
 
-	def _HandleSize(self, evt):
+	def _HandleSize(self, event):
 		"""
 		The ListView is being resized
 		"""
 		_log("@DataObjectListView._HandleSize")
-		self._PossibleFinishCellEdit()
-		evt.Skip()
+		# self._PossibleFinishCellEdit()
+		event.Skip()
 		self._ResizeSpaceFillingColumns()
 		# Make sure our empty msg is reasonably positioned
 		sz = self.GetClientSize()
@@ -6063,6 +6038,7 @@ class DataColumnDefn(object):
 			imageGetter=None,
 			stringConverter=None,
 			valueSetter=None,
+			isSortable=True,
 			isEditable=True,
 			fixedWidth=None,
 			minimumWidth=-1,
@@ -6099,6 +6075,7 @@ class DataColumnDefn(object):
 		self.cellEditorCreator = cellEditorCreator
 		self.freeSpaceProportion = 1
 		self.isEditable = isEditable
+		self.isSortable = isSortable
 		self.isSearchable = isSearchable
 		self.useBinarySearch = useBinarySearch
 		self.headerImage = headerImage
@@ -6172,6 +6149,15 @@ class DataColumnDefn(object):
 		}.get(self.align[:1], wx.ALIGN_LEFT)
 
 		return alignment
+
+	def SetSortable(self, state = None):
+		if (state is not None):
+			self.isSortable = state
+
+		print("@1", self.isSortable)
+
+		self.column.Sortable = self.isSortable
+		self.column.Reorderable = self.isSortable
 
 	#-------------------------------------------------------------------------
 	# Value accessing
@@ -6419,10 +6405,34 @@ class DataColumnDefn(object):
 #Utility Functions
 def _log(*data):
 	pass
-# 	print(*data)
 # 	with open("log.txt", "a") as f:
 # 		f.write(f"{', '.join([f'{item}' for item in data])}\n")
 # open('log.txt', 'w').close()
+
+def printCurrentTrace(printout = True):
+	"""Prints out the stack trace for the current place in the program.
+	Modified Code from codeasone on https://stackoverflow.com/questions/1032813/dump-stacktraces-of-all-active-threads
+
+	Example Input: printCurrentTrace()
+	"""
+
+	import sys
+	import traceback
+	code = []
+	for threadId, stack in sys._current_frames().items():
+		code.append("\n# ThreadID: %s" % threadId)
+		for filename, lineno, name, line in traceback.extract_stack(stack):
+			code.append('File: "%s", line %d, in %s' % (filename,
+														lineno, name))
+			if line:
+				code.append("  %s" % (line.strip()))
+
+	if (printout):
+		for line in code:
+			print (line)
+		sys.exit()
+	else:
+		return code
 
 def _StringToValue(value, converter):
 	"""
@@ -6715,30 +6725,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	#     # so any Python object can be used as data nodes. If the data nodes
 	#     # are weak-referencable then the objmapper can use a
 	#     # WeakValueDictionary instead.
-		# self.UseWeakRefs(True)
-
-	def AddNotifier(self, notifier):
-		#Adds a wx.dataview.DataViewModelNotifier to the model.
-		_log("@model.AddNotifier", notifier)
-		return super().AddNotifier(notifier)
-
-	def ChangeValue(self, variant, item, column):
-		#Change the value of the given item and update the control to reflect it.
-		#This function simply calls SetValue and, if it succeeded, ValueChanged .
-		_log("@model.ChangeValue", variant, item, column)
-		return super().ChangeValue(variant, item, column)
-
-	def Cleared(self):
-		#Called to inform the model that all data has been cleared.
-		#The control will reread the data from the model again.
-		_log("@model.Cleared")
-		return super().Cleared()
-
-	def Compare(self, item1, item2, column, ascending):
-		#The compare function to be used by control.
-		#The default compare function sorts by container and other items separately and in ascending order. Override this for a different sorting behaviour.
-		_log("@model.Compare", item1, item2, column, ascending)
-		return super().Compare(item1, item2, column, ascending)
+		self.UseWeakRefs(True)
 
 	def GetAttr(self, item, column, attribute):
 		#Override this to indicate that the item has special font attributes.
@@ -6748,8 +6735,10 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		changed = False
 		node = self.ItemToObject(item)
-		if (id(node) in self.colorCatalogue):
-			attribute.SetBackgroundColour(self.colorCatalogue[id(node)])
+		if (node in self.olv.colorOverride):
+			attribute.SetBackgroundColour(self.olv.colorOverride[node])
+		elif (node in self.colorCatalogue):
+			attribute.SetBackgroundColour(self.colorCatalogue[node])
 
 		if (isinstance(node, ListGroup)):
 			attribute.SetBold(self.olv.groupFont[0])
@@ -6772,15 +6761,20 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			if (self.olv.useAlternateBackColors and self.olv.InReportView()):
 				for index, row in enumerate(rows):
 					#Determine row color outside of virtual function for speed
-					if (index & 1):
-						self.colorCatalogue[id(row)] = self.olv.oddRowsBackColor
+					if (index in self.olv.colorOverride):
+						self.colorCatalogue[row] = self.olv.colorOverride[index]
+					elif (index & 1):
+						self.colorCatalogue[row] = self.olv.oddRowsBackColor
 					else:
-						self.colorCatalogue[id(row)] = self.olv.evenRowsBackColor
+						self.colorCatalogue[row] = self.olv.evenRowsBackColor
 
 		def applyGroupColor(group):
 			if (self.olv.useAlternateBackColors and self.olv.InReportView()):
 				if (self.olv.groupBackColor != None):
-					self.colorCatalogue[id(group)] = self.olv.groupBackColor
+					if (index in self.olv.colorOverride):
+						self.colorCatalogue[group] = self.olv.colorOverride[index]
+					else:
+						self.colorCatalogue[group] = self.olv.groupBackColor
 				applyRowColor(group.modelObjects)
 
 		# The view calls this method to find the children of any node in the
@@ -6815,28 +6809,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				children.append(self.ObjectToItem(row))
 			return len(node.modelObjects)
 		return 0
-
-	# Report how many columns this model provides data for.
-	def GetColumnCount(self):
-		#Override this to indicate the number of columns in the model.
-		_log("@model.GetColumnCount")
-		return len(self.olv.columns)
-
-	# Map the data column numbers to the data type
-	def GetColumnType(self, column):
-		#Override this to indicate what type of data is stored in the column specified by column.
-		#This should return a string indicating the type of data as reported by Variant .
-		_log("@model.GetColumnType", column)
-		hgjhghj
-
-		mapper = { 0 : 'string',
-				   1 : 'string',
-				   2 : 'string',
-				   3.: 'string', # the real value is an int, but the renderer should convert it okay
-				   4 : 'datetime',
-				   5 : 'bool',
-				   }
-		return mapper[column]
 
 	def GetParent(self, item):
 		#Override this to indicate which wx.dataview.DataViewItem representing the parent of item 
@@ -6879,10 +6851,9 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			raise AttributeError(f"There is no column {column}")
 
 		if (isinstance(node, ListGroup)):
-			value = node.title
-		else:
-			value = _Munge(node, defn.valueGetter)
+			return node.title
 
+		value = _Munge(node, defn.valueGetter)
 		if (isinstance(defn.renderer, (wx.dataview.DataViewProgressRenderer, wx.dataview.DataViewSpinRenderer, 
 			wx.dataview.DataViewBitmapRenderer, wx.dataview.DataViewToggleRenderer, Renderer_Button))):
 				return value
@@ -6899,6 +6870,32 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		return _StringToValue(value, defn.stringConverter)
 
+	def SetValue(self, value, item, column):
+		# This gets called in order to set a value in the data model.
+		# The most common scenario is that the wx.dataview.DataViewCtrl calls this method after the user changed some data in the view.
+		# This is the function you need to override in your derived class but if you want to call it, ChangeValue is usually more convenient as otherwise you need to manually call ValueChanged to update the control itself.
+		_log("@model.SetValue", value, item, column)
+
+		# We're not allowing edits in column zero (see below) so we just need
+		# to deal with Song objects and cols 1 - 5
+
+		node = self.ItemToObject(item)
+		if (isinstance(node, ListGroup)):
+			return True
+
+		try:
+			defn = self.olv.columns[column]
+		except AttributeError:
+			raise AttributeError(f"There is no column {column}")
+
+		if (defn.valueSetter is None):
+			_SetValueUsingMunger(node, value, defn.valueGetter, False)
+		else:
+			_SetValueUsingMunger(node, value, defn.valueSetter, True)
+			
+		return True
+
+	#Checking ------------------------------------------------------------------------------------------------------
 	def HasContainerColumns(self, item):
 		#Override this method to indicate if a container item merely acts as a headline (or for categorisation) 
 		#or if it also acts a normal item with entries for further columns.
@@ -6948,13 +6945,47 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# _log("@model.IsEnabled", item, column)
 		return super().IsEnabled(item, column)
 
-	def IsListModel(self):
-		# _log("@model.IsListModel")
-		return super().IsListModel()
+	# Report how many columns this model provides data for.
+	def GetColumnCount(self):
+		#Override this to indicate the number of columns in the model.
+		_log("@model.GetColumnCount")
+		return len(self.olv.columns)
 
-	def IsVirtualListModel(self):
-		# _log("@model.IsVirtualListModel", super().IsVirtualListModel(), super().IsListModel())
-		return super().IsVirtualListModel()
+	# Map the data column numbers to the data type
+	def GetColumnType(self, column):
+		#Override this to indicate what type of data is stored in the column specified by column.
+		#This should return a string indicating the type of data as reported by Variant .
+		_log("@model.GetColumnType", column)
+		hgjhghj
+
+		mapper = { 0 : 'string',
+				   1 : 'string',
+				   2 : 'string',
+				   3.: 'string', # the real value is an int, but the renderer should convert it okay
+				   4 : 'datetime',
+				   5 : 'bool',
+				   }
+		return mapper[column]
+
+	#Structure Change Notifications ---------------------------------------------------------------------------------
+	def Cleared(self):
+		#Called to inform the model that all data has been cleared.
+		#The control will reread the data from the model again.
+		_log("@model.Cleared")
+		return super().Cleared()
+
+	def ChangeValue(self, variant, item, column):
+		#Change the value of the given item and update the control to reflect it.
+		#This function simply calls SetValue and, if it succeeded, ValueChanged .
+		_log("@model.ChangeValue", variant, item, column)
+		return super().ChangeValue(variant, item, column)
+
+	def ValueChanged(self, item, column):
+		# Call this to inform this model that a value in the model has been changed.
+		# This is also called from wx.dataview.DataViewCtrl‘s internal editing code, e.g. when editing a text field in the control.
+		# This will eventually emit a wxEVT_DATAVIEW_ITEM_VALUE_CHANGED event to the user.
+		_log("@model.ValueChanged", item, column)
+		return super().ValueChanged(item, column)
 
 	def ItemAdded(self, parent, item):
 		#Call this to inform the model that an item has been added to the data.
@@ -6977,6 +7008,8 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def ItemDeleted(self, parent, item):
 		#Call this to inform the model that an item has been deleted from the data.
 		_log("@model.ItemDeleted", parent, item)
+		if (parent is None):
+			parent = self.GetParent(item)
 		if (not isinstance(item, wx.dataview.DataViewItem)):
 			item = self.ObjectToItem(item)
 		return super().ItemDeleted(parent, item)
@@ -6996,54 +7029,107 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# Call this to inform the model that several items have changed.
 		# This will eventually emit wxEVT_DATAVIEW_ITEM_VALUE_CHANGED events (in which the column fields will not be set) to the user.
 		_log("@model.ItemsChanged", items)
-		return super().ItemsChanged(items)
+
+		for item in items:
+			answer = self.ItemChanged(item)
+		return True
 
 	def ItemsDeleted(self, parent, items):
 		# Call this to inform the model that several items have been deleted.
 		_log("@model.ItemsDeleted", items)
-		return super().ItemsDeleted(parent, items)
 
-	def RemoveNotifier(self, notifier):
-		# Remove the notifier from the list of notifiers.
-		_log("@model.RemoveNotifier", notifier)
-		return super().RemoveNotifier(notifier)
+		if (parent is not None):
+			return super().ItemsDeleted(parent, items)
+		
+		for item in items:
+			answer = self.ItemDeleted(parent, item)
+		return True
 
+	#Sorting-------------------------------------------------------
 	def Resort(self):
 		# Call this to initiate a resort after the sort function has been changed.
 		_log("@model.Resort")
-		return super().Resort()
 
-	def SetValue(self, value, item, column):
-		# This gets called in order to set a value in the data model.
-		# The most common scenario is that the wx.dataview.DataViewCtrl calls this method after the user changed some data in the view.
-		# This is the function you need to override in your derived class but if you want to call it, ChangeValue is usually more convenient as otherwise you need to manually call ValueChanged to update the control itself.
-		_log("@model.SetValue", value, item, column)
+		#Fire a SortEvent that can be catched by an OLV-using developer using Bind() for this event
+		event = OLVEvent.SortEvent(self.olv, self.olv.sortColumnIndex, self.olv.sortAscending, False)
+		self.olv.GetEventHandler().ProcessEvent(event)
+		if (event.IsVetoed()):
+			return
 
-		# We're not allowing edits in column zero (see below) so we just need
-		# to deal with Song objects and cols 1 - 5
+		if (not event.wasHandled):
+			return super().Resort()
 
-		node = self.ItemToObject(item)
-		if (isinstance(node, ListGroup)):
-			return True
+	def GetSortValue(self, item, column):
+		"""Returns the value to be used for sorting."""
 
 		try:
 			defn = self.olv.columns[column]
 		except AttributeError:
 			raise AttributeError(f"There is no column {column}")
 
-		if (defn.valueSetter is None):
-			_SetValueUsingMunger(node, value, defn.valueGetter, False)
-		else:
-			_SetValueUsingMunger(node, value, defn.valueSetter, True)
-			
-		return True
+		if (isinstance(defn.renderer, (wx.dataview.DataViewBitmapRenderer, Renderer_MultiImage))):
+			#Do not compare images
+			return 0
+		
+		value = self.GetValue(item, column)
+		if (isinstance(defn.renderer, wx.dataview.DataViewIconTextRenderer)):
+			#Only compare the text
+			value = value.GetText()
+		
+		# When sorting large groups, this is called a lot. Make it efficent.
+		# It is more efficient (by about 30%) to try to call lower() and catch the
+		# exception than it is to test for the class
+		if (not self.olv.caseSensative):
+			try:
+				value = value.lower()
+			except AttributeError:
+				pass
+		return value
 
-	def ValueChanged(self, item, column):
-		# Call this to inform this model that a value in the model has been changed.
-		# This is also called from wx.dataview.DataViewCtrl‘s internal editing code, e.g. when editing a text field in the control.
-		# This will eventually emit a wxEVT_DATAVIEW_ITEM_VALUE_CHANGED event to the user.
-		_log("@model.ValueChanged", item, column)
-		return super().ValueChanged(item, column)
+	def Compare(self, item1, item2, column, ascending):
+		#The compare function to be used by control.
+		#The default compare function sorts by container and other items separately and in ascending order. Override this for a different sorting behaviour.
+		#The comparison function should return negative, null or positive value depending on whether the first item is less than, equal to or greater than the second one. 
+		#The items should be compared using their values for the given column.
+		_log("@model.Compare", item1, item2, column, ascending)
+
+		if (isinstance(item1, ListGroup)):
+			if (self.olv.groupCompareFunction != None):
+				return self.olv.groupCompareFunction(self.ItemToObject(item1), self.ItemToObject(item2), column, ascending)
+		else:
+			if (self.olv.compareFunction != None):
+				return self.olv.compareFunction(self.ItemToObject(item1), self.ItemToObject(item2), column, ascending)
+		
+		value1 = self.GetSortValue(item1, column)
+		value2 = self.GetSortValue(item2, column)
+
+		#The builtin function cmp is depricated now
+		#Account for None being a value
+		if ((value1 is None, value1) > (value2 is None, value2)):
+			return (1, -1)[ascending]
+		elif ((value1 is None, value1) < (value2 is None, value2)):
+			return (-1, 1)[ascending]
+		else:
+			return 0
+
+	#Unused -----------------------------------------------------------------------------
+	def AddNotifier(self, notifier):
+		#Adds a wx.dataview.DataViewModelNotifier to the model.
+		_log("@model.AddNotifier", notifier)
+		return super().AddNotifier(notifier)
+
+	def RemoveNotifier(self, notifier):
+		# Remove the notifier from the list of notifiers.
+		_log("@model.RemoveNotifier", notifier)
+		return super().RemoveNotifier(notifier)
+
+	def IsListModel(self):
+		# _log("@model.IsListModel")
+		return super().IsListModel()
+
+	def IsVirtualListModel(self):
+		# _log("@model.IsVirtualListModel", super().IsVirtualListModel(), super().IsListModel())
+		return super().IsVirtualListModel()
 
 #Renderers
 class Renderer_MultiImage(wx.dataview.DataViewCustomRenderer):
