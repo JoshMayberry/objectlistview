@@ -3213,7 +3213,7 @@ class GroupListView(FastObjectListView):
 		"""
 		Do the real work of expanding/collapsing the given groups
 		"""
-		# Cull groups that aren't going to change
+		# Cull groups that aren't going to change 
 		groups = [x for x in groups if x.isExpanded != isExpanding]
 		if not groups:
 			return
@@ -3232,35 +3232,7 @@ class GroupListView(FastObjectListView):
 			# if ((not isExpanding) and (not isinstance(x, ListEmptyGroup))):
 				self.EnsureVisible(0)
 				break
-			# for modelObject in group.modelObjects:
-			#     index = self.GetIndexOf(modelObject)
-			#     realIndex = self._MapModelIndexToListIndex(index)
-			#     x, y, length, height = self.GetItemRect(realIndex, wx.LIST_RECT_BOUNDS)
-			#     _log("@1", index, realIndex, x, y, length, height)
-			#     if (y < height):
-			#         self.EnsureVisible(realIndex - 1)
-			#         break
-
-
-		# if ((not isExpanding) and (any(not isinstance(item, ListEmptyGroup) for item in evt.groups))):
-			# item = self.GetNextItem(-1, wx.LIST_NEXT_ALL, wx.LIST_STATE_DONTCARE)
-			# while (item != -1):
-		#     #     previousItem = item
-		#     #     item = self.GetNextItem(item, wx.LIST_NEXT_ALL, wx.LIST_STATE_DONTCARE)
-
-		#     realIndex = self._MapModelIndexToListIndex(self.GetTopItem())
-		#     x, y, length, height = self.GetItemRect(realIndex, wx.LIST_RECT_BOUNDS)
-		#     _log("@1", x, y, length, height)
-		#     if (y < height):
-		#         self.ScrollList(0, -height + y)
-
-		# x, y, length, height = self.GetItemRect(self.GetTopItem(), wx.LIST_RECT_BOUNDS)
-		# _log("@1", x, y, length, height)
-		# if (y < height):
-		#     self.ScrollList(0, -height + y - 100)
-
-		# _log("@2", self.GetItemRect(self.GetTopItem(), wx.LIST_RECT_BOUNDS))
-		# _log("@3", self.GetItemRect(self.GetTopItem(), wx.LIST_RECT_LABEL))
+		
 
 
 		# Expand/contract the groups, then put those changes into effect
@@ -4790,7 +4762,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.groupTitle 				= kwargs.pop("groupTitle", "")
 		self.showGroups 				= kwargs.pop("showGroups", False)
 		self.showItemCounts 			= kwargs.pop("showItemCounts", True)
-		self.useExpansionColumn 		= kwargs.pop("useExpansionColumn", True)
 		self.separateGroupColumn 		= kwargs.pop("separateGroupColumn", False)
 		self.alwaysGroupByColumnIndex	= kwargs.pop("alwaysGroupByColumnIndex", -1)
 		self.putBlankLineBetweenGroups	= kwargs.pop("putBlankLineBetweenGroups", True)
@@ -4899,38 +4870,13 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			else:
 				self.AddColumnDefn(DataColumnDefn(*x))
 
-		if (self.separateGroupColumn):
-			self.UpdateGroupColumn()
+		self.UpdateGroupColumn()
 
 		#Try to preserve the sort column
 		self.SetSortColumn(sortCol)
 		if (repopulate):
 			self.RepopulateList()
-
-	def UpdateGroupColumn(self):
-		if (not self.showGroups):
-			self.columns.pop(None, None)
-			return
-
-		if (None not in self.columns):
-			self.columns[None] = DataColumnDefn(title = self.groupTitle)
-		else:
-			defn.title = self.groupTitle
-
-		defn = self.columns[None]
-		defn.column = wx.dataview.DataViewColumn(defn.title, defn.renderer, 0, 
-			width = defn.width, align = defn.GetAlignment(), flags = wx.dataview.DATAVIEW_COL_RESIZABLE)
-		self.InsertColumn(0, defn.column)
-
-	def SetGroups(self, groups):
-		"""
-		Present the collection of ListGroups in this control.
-
-		Calling this automatically put the control into ShowGroup mode
-		"""
-		self.modelObjects = list()
-		self.SetShowGroups(True)
-		self._SetGroups(groups)
+		self.AutoSizeColumns()
 
 	def AddColumnDefn(self, defn, index = None):
 		"""
@@ -4953,6 +4899,25 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			self.InsertColumn(index, defn.column)
 		else:
 			self.AppendColumn(defn.column)
+
+	def SetObjects(self, modelObjects, preserveSelection = False, preserveExpansion = True):
+		"""
+		Set the list of modelObjects to be displayed by the control.
+		"""
+		_log("@DataObjectListView.SetObjects", modelObjects, preserveSelection)
+
+		if (preserveSelection):
+			selection = self.GetSelectedObjects()
+
+		self.ClearAll()
+		if (modelObjects is None):
+			modelObjects = []
+
+		self.AddObjects(modelObjects, preserveExpansion = preserveExpansion)
+		self.stEmptyListMsg.Show(len(self.modelObjects) == 0)
+
+		if (preserveSelection):
+			self.SelectObjects(selection)
 
 	def SetEmptyListMsg(self, msg):
 		"""
@@ -4987,9 +4952,18 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		return len(self.modelObjects)
 
 	#Selection Functions
+	def YieldSelected(self):
+		"""
+		Progressively yield all selected items
+		"""
+		_log("@DataObjectListView.YieldSelected")
+
+		for item in self.GetSelections():
+			yield self.model.ItemToObject(item)
+
 	def GetSelectedObject(self):
 		"""
-		Return the selected modelObject or None if nothing is selected or if more than one is selected.
+		Return the selected modelObject or None if nothing is selected
 		"""
 		_log("@DataObjectListView.GetSelectedObject")
 		for model in self.YieldSelectedObjects():
@@ -5009,14 +4983,50 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		_log("@DataObjectListView.YieldSelectedObjects")
 
-		for item in self.GetSelections():
-			yield self.model.ItemToObject(item)
+		for item in self.YieldSelected():
+			if (not isinstance(item, DataListGroup)):
+				yield item
+
+	def GetSelectedGroup(self):
+		"""
+		Return the selected groups or None if nothing is selected
+		"""
+		_log("@DataObjectListView.GetSelectedGroup")
+		for model in self.YieldSelectedGroups():
+			return model
+		return None
+
+	def GetSelectedGroups(self):
+		"""
+		Return a list of the selected groups
+		"""
+		_log("@DataObjectListView.GetSelectedGroups")
+		return list(self.YieldSelectedGroups())
+
+	def YieldSelectedGroups(self):
+		"""
+		Progressively yield the selected groups
+		"""
+		_log("@DataObjectListView.YieldSelectedGroups")
+
+		for item in self.YieldSelected():
+			if (isinstance(item, DataListGroup)):
+				yield item
 
 	def IsObjectSelected(self, modelObject):
 		"""
 		Is the given modelObject selected?
 		"""
 		return modelObject in self.GetSelectedObjects()
+
+	def IsGroupSelected(self, group):
+		"""
+		Is the given group selected?
+		"""
+		if (isinstance(group, str)):
+			return group in [item.key for item in self.GetSelectedGroups()]
+		else:
+			return group in self.GetSelectedGroups()
 
 	def SetSelections(self, modelObjects):
 		self.UnselectAll()
@@ -5031,32 +5041,63 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		item = self.model.ItemToObject(modelObject)
 		super().Unselect(item)
 
+	def SelectAll(self):
+		"""
+		Selected all model objects in the control.
+
+		In a GroupListView, this does not select blank lines or groups
+		"""
+		super().SelectAll()
+
+	def UnselectAll(self):
+		"""
+		Unselect all model objects in the control.
+		"""
+		super().UnselectAll()
+
+	def SelectObject(self, modelObject, deselectOthers = True, ensureVisible = False):
+		"""
+		Select the given modelObject. If deselectOthers is True, all other rows will be deselected
+		"""
+		if (deselectOthers):
+			self.DeselectAll()
+
+		self.Select(modelObject)
+
+		if (ensureVisible):
+			self.EnsureVisible(modelObject)
+
+	def SelectObjects(self, modelObjects, deselectOthers = True):
+		"""
+		Select all of the given modelObjects. If deselectOthers is True, all other rows will be deselected
+		"""
+		if (deselectOthers):
+			self.DeselectAll()
+
+		for x in modelObjects:
+			self.SelectObject(x, deselectOthers = False)
+
+	def SelectGroup(self, modelObject, deselectOthers = True, ensureVisible = False):
+		"""
+		Select the group of the given modelObject. If deselectOthers is True, all other rows will be deselected
+		"""
+
+		if (isinstance(modelObject, str)):
+			modelObject = [group for group in self.groups if (group.key == modelObject)][0]
+
+		self.SelectObject(modelObject, deselectOthers = deselectOthers, ensureVisible = ensureVisible)
+
+	def SelectGroups(self, modelObjects, deselectOthers = True):
+		"""
+		Select all the groups of the given modelObjects. If deselectOthers is True, all other rows will be deselected
+		"""
+		if (deselectOthers):
+			self.DeselectAll()
+
+		for x in modelObjects:
+			self.SelectGroup(x, deselectOthers = False)
+
 	#Show functions
-	def GetShowGroups(self):
-		"""
-		Return whether or not this control is showing groups of objects or a straight list
-		"""
-		return self.showGroups
-
-	def SetShowGroups(self, showGroups = True):
-		"""
-		Set whether or not this control is showing groups of objects or a straight list
-		"""
-		if (showGroups == self.showGroups):
-			return
-
-		self.showGroups = showGroups
-		if (not len(self.columns)):
-			return
-
-		if (showGroups):
-			self.SetColumns(self.columns, False)
-		else:
-			if (self.useExpansionColumn):
-				self.SetColumns(self.columns[1:], False)
-
-		self.model.Cleared()
-
 	def GetShowItemCounts(self):
 		"""
 		Return whether or not the number of items in a groups should be included in the title
@@ -5073,17 +5114,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			self._SetGroups(self.groups)
 
 	#Get column functions
-	def GetGroupByColumn(self, *args, **kwargs):
-		"""
-		Return the column by which the rows should be grouped
-		"""
-		if self.alwaysGroupByColumnIndex >= 0:
-			return self.GetAlwaysGroupByColumn(*args, **kwargs)
-		elif self.GetSortColumn(*args, **kwargs) is None:
-			return self.GetPrimaryColumn(*args, **kwargs)
-		else:
-			return self.GetSortColumn(*args, **kwargs)
-
 	def GetPrimaryColumn(self, returnIndex = False):
 		"""
 		Return the primary column or None there is no primary column.
@@ -5111,6 +5141,64 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				return i
 		return -1
 
+	#Groups
+	def UpdateGroupColumn(self):
+		if ((not self.showGroups) or (not self.separateGroupColumn)):
+			self.columns.pop(None, None)
+			return
+
+		if (None not in self.columns):
+			self.columns[None] = DataColumnDefn(title = self.groupTitle)
+		else:
+			defn.title = self.groupTitle
+
+		defn = self.columns[None]
+		defn.column = wx.dataview.DataViewColumn(defn.title, defn.renderer, 0, 
+			width = defn.width, align = defn.GetAlignment(), flags = wx.dataview.DATAVIEW_COL_RESIZABLE)
+		self.InsertColumn(0, defn.column)
+
+	def SetGroups(self, groups):
+		"""
+		Present the collection of DataListGroups in this control.
+
+		Calling this automatically put the control into ShowGroup mode
+		"""
+		self.modelObjects = list()
+		self.SetShowGroups(True)
+		self._SetGroups(groups)
+
+	def GetShowGroups(self):
+		"""
+		Return whether or not this control is showing groups of objects or a straight list
+		"""
+		return self.showGroups
+
+	def SetShowGroups(self, showGroups = True):
+		"""
+		Set whether or not this control is showing groups of objects or a straight list
+		"""
+		if (showGroups == self.showGroups):
+			return
+
+		self.showGroups = showGroups
+		if (not len(self.columns)):
+			return
+
+		self.model.Cleared()
+
+	def GetGroupByColumn(self, *args, **kwargs):
+		"""
+		Return the column by which the rows should be grouped
+		"""
+		if (self.alwaysGroupByColumnIndex >= 0):
+			return self.GetAlwaysGroupByColumn(*args, **kwargs)
+
+		elif (self.GetSortColumn(*args, **kwargs) is None):
+			return self.GetPrimaryColumn(*args, **kwargs)
+
+		else:
+			return self.GetSortColumn(*args, **kwargs)
+
 	def GetAlwaysGroupByColumn(self, returnIndex = False):
 		"""
 		Get the column by which the rows should be always be grouped.
@@ -5132,20 +5220,114 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Set the column by which the rows should be always be grouped.
 
-		'column' can be None (which clears the setting), a ColumnDefn,
+		'column' can be None (which clears the setting), a DataColumnDefn,
 		or the index of the column desired
 		"""
-		if column is None:
+		if (column is None):
 			self.alwaysGroupByColumnIndex = -1
-		elif isinstance(column, ColumnDefn):
+		elif (isinstance(column, DataColumnDefn)):
 			try:
-				self.alwaysGroupByColumnIndex = self.columns.index(column)
-			except ValueError:
+				self.alwaysGroupByColumnIndex = [key for key, value in self.columns.items() if (value is column)][0]
+			except IndexError:
 				self.alwaysGroupByColumnIndex = -1
 		else:
 			self.alwaysGroupByColumnIndex = column
 
-	# Sizing
+	def ToggleExpansion(self, group):
+		"""
+		Toggle the expanded/collapsed state of the given group and redisplay the list
+		"""
+		self._DoExpandCollapse([group], not group.IsExpanded())
+
+	def Expand(self, group):
+		"""
+		Expand the given group and redisplay the list
+		"""
+		self._DoExpandCollapse([group], True)
+
+	def Collapse(self, group):
+		"""
+		Collapse the given group and redisplay the list
+		"""
+		# _log("@DataObjectListView.Collapse", group)
+		self._DoExpandCollapse([group], False)
+
+	def ExpandAll(self, groups=None):
+		"""
+		Expand the given groups (or all groups) and redisplay the list
+		"""
+		if groups is None:
+			groups = self.groups
+		self._DoExpandCollapse(groups, True)
+
+	def CollapseAll(self, groups=None):
+		"""
+		Collapse the given groups (or all groups) and redisplay the list
+		"""
+		if groups is None:
+			groups = self.groups
+
+		self._DoExpandCollapse(groups, False)
+
+	def _DoExpandCollapse(self, groups, isExpanding):
+		"""
+		Do the real work of expanding/collapsing the given groups
+		"""
+		_log("@DataObjectListView._DoExpandCollapse", groups, isExpanding)
+		# Cull groups that aren't going to change
+		groups = [x for x in groups if x.IsExpanded() != isExpanding]
+		if not groups:
+			return
+
+		# Let the world know that the given groups are about to be
+		# expanded/collapsed
+		event = OLVEvent.ExpandingCollapsingEvent(self, groups, isExpanding)
+		self.GetEventHandler().ProcessEvent(event)
+		if event.IsVetoed():
+			return
+
+		# Expand/collapse the groups, then put those changes into effect
+		for x in event.groups:
+			if (isExpanding):
+				super().Expand(self.model.ObjectToItem(x))
+			else:
+				super().Collapse(self.model.ObjectToItem(x))
+
+		# Let the world know that the given groups have been expanded/collapsed
+		event = OLVEvent.ExpandedCollapsedEvent(self, event.groups, isExpanding)
+		self.GetEventHandler().ProcessEvent(event)
+
+	def Reveal(self, modelObject):
+		"""
+		Ensure that the given modelObject is visible, expanding the group it belongs to,
+		if necessary
+		"""
+		# If it is already there, just make sure it is visible
+		i = self.GetIndexOf(modelObject)
+		if i != -1:
+			self.EnsureVisible(i)
+			return True
+
+		# Find which group (if any) the object belongs to, and
+		# expand it and then try to reveal it again
+		for group in self.groups:
+			if not group.IsExpanded() and modelObject in group.modelObjects:
+				self.Expand(group)
+				return self.Reveal(modelObject)
+
+		return False
+
+	def FindGroupFor(self, modelObject):
+		"""
+		Return the group that contains the given object or None if the given
+		object is not found
+		"""
+		for group in self.groups:
+			if modelObject in group.modelObjects:
+				return group
+		return None
+
+	#Sizing
 	def AutoSizeColumns(self):
 		"""
 		Resize our auto sizing columns to match the data
@@ -5168,6 +5350,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Change the width of space filling columns so that they fill the
 		unoccupied width of the listview
 		"""
+		print("@DataObjectListView._ResizeSpaceFillingColumns")
 		# _log("@DataObjectListView._ResizeSpaceFillingColumns")
 		# If the list isn't in report view or there are no space filling
 		# columns, just return
@@ -5219,25 +5402,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.modelObjects = []
 		self.model.Cleared()
 
-	def SetObjects(self, modelObjects, preserveSelection = False):
-		"""
-		Set the list of modelObjects to be displayed by the control.
-		"""
-		_log("@DataObjectListView.SetObjects", modelObjects, preserveSelection)
-
-		if (preserveSelection):
-			selection = self.GetSelectedObjects()
-
-		self.ClearAll()
-		if (modelObjects is None):
-			modelObjects = []
-
-		self.AddObjects(modelObjects)
-		self.stEmptyListMsg.Show(len(self.modelObjects) == 0)
-
-		if (preserveSelection):
-			self.SelectObjects(selection)
-
 	def AddObject(self, modelObject):
 		"""
 		Add the given object to our collection of objects.
@@ -5247,7 +5411,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		self.AddObjects([modelObject])
 
-	def AddObjects(self, modelObjects):
+	def AddObjects(self, modelObjects, preserveExpansion = True):
 		"""
 		Add the given collections of objects to our collection of objects.
 
@@ -5258,13 +5422,16 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		try:
 			# self.Freeze()
 			self.modelObjects.extend(modelObjects)
-			self.RebuildGroups()
+			self.RebuildGroups(preserveExpansion = preserveExpansion)
 			self.model.ItemsAdded(None, modelObjects)
 		finally:
 			pass
 			# self.Thaw()
 
-		# self.model.Cleared()
+		if (self.showGroups):
+			#Groups not updating children correctly, but rebuilding it all over again fixes it
+			#TO DO: Fix self.model.ItemsAdded for groups
+			self.model.Cleared()
 
 	def EnsureVisible(self, modelObject, column = None):
 		"""
@@ -5287,13 +5454,22 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.model.Cleared()
 		self.stEmptyListMsg.Show(len(self.modelObjects) == 0)
 
+		#Ensure expansion matches our model
+		# for group in self.groups:
+		# 	item = self.model.ObjectToItem(group)
+		# 	if (self.IsExpanded(item) != group.IsExpanded()):
+		# 		if (group.IsExpanded()):
+		# 			super().Expand(item)
+		# 		else:
+		# 			super().Collapse(item)
+
 		# Auto-resize once all the data has been added
 		# self.AutoSizeColumns()
 
 	#-------------------------------------------------------------------------
 	# Building
 
-	def RebuildGroups(self):
+	def RebuildGroups(self, preserveExpansion = True):
 		"""
 		Completely rebuild our groups from our current list of model objects.
 
@@ -5304,29 +5480,34 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if (not self.showGroups):
 			return
 
-		groups = self._BuildGroups()
+		groups = self._BuildGroups(preserveExpansion = preserveExpansion)
 		# self.SortGroups(groups)
 		self._SetGroups(groups)
 
 	def _SetGroups(self, groups):
 		"""
-		Present the collection of ListGroups in this control.
+		Present the collection of DataListGroups in this control.
 		"""
 		_log("@DataObjectListView._SetGroups", groups)
 		self.groups = groups
 		self.RepopulateList()
 
-	def _BuildGroups(self, modelObjects = None):
+	def _BuildGroups(self, modelObjects = None, preserveExpansion = True):
 		"""
-		Partition the given list of objects into ListGroups depending on the given groupBy column.
+		Partition the given list of objects into DataListGroups depending on the given groupBy column.
 
-		Returns the created collection of ListGroups
+		Returns the created collection of DataListGroups
 		"""
 		_log("@DataObjectListView._BuildGroups", modelObjects)
 		if (modelObjects is None):
 			modelObjects = self.modelObjects
 		if (self.filter):
 			modelObjects = self.filter(modelObjects)
+
+		if (preserveExpansion):
+			expanded = {}
+			for group in self.groups:
+				expanded[group.key] = group.IsExpanded()
 
 		groupingColumn = self.GetGroupByColumn()
 
@@ -5335,17 +5516,27 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			key = groupingColumn.GetGroupKey(model)
 			group = groupMap.get(key)
 			if (group is None):
-				groupMap[key] = group = ListGroup(
-					key,
-					groupingColumn.GetGroupKeyAsString(key))
+				group = DataListGroup(self, key, groupingColumn.GetGroupKeyAsString(key))
+				groupMap[key] = group
 			group.Add(model)
 
 		for key in self.emptyGroups:
 			group = groupMap.get(key)
 			if (group is None):
-				groupMap[key] = group = ListEmptyGroup(
-					key,
-					groupingColumn.GetGroupKeyAsString(key))
+				groupMap[key] = DataListEmptyGroup(self, key, groupingColumn.GetGroupKeyAsString(key))
+
+		#Not working Yet. super().Expand(item) does not expand the item.
+		#TO DO: Find out why
+		if (preserveExpansion):
+			for key, isExpanded in expanded.items():
+				group = groupMap.get(key)
+				if (group is not None):
+					group.Expand(isExpanded)
+
+					# if (isExpanded):
+					# 	super().Expand(self.model.ObjectToItem(group))
+					# else:
+					# 	super().Collapse(self.model.ObjectToItem(group))
 
 		groups = groupMap.values()
 
@@ -5370,7 +5561,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	# 	"""
 	# 	Build the list that will be used to populate the ListCtrl.
 
-	# 	This internal list is an amalgum of model objects, ListGroups
+	# 	This internal list is an amalgum of model objects, DataListGroups
 	# 	and None (which are blank rows).
 	# 	"""
 	# 	_log("@DataObjectListView._BuildInnerList")
@@ -5392,7 +5583,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	# 		if len(self.innerList) and self.putBlankLineBetweenGroups:
 	# 			self.innerList.append(None)
 	# 		self.innerList.append(grp)
-	# 		if grp.isExpanded:
+	# 		if grp.IsExpanded():
 	# 			self.innerList.extend(grp.modelObjects)
 
 	# ---Sorting-------------------------------------------------------#000000#FFFFFF
@@ -5484,7 +5675,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Allows the user to use a different compare function for sorting groups.
 
-		The comparison function must accept two ListGroup objects as two parameters.
+		The comparison function must accept two DataListGroup objects as two parameters.
 		The comparison function should return negative, null or positive value depending on whether the first item is less than, equal to or greater than the second one.
 		"""
 		self.groupCompareFunction = function
@@ -6047,6 +6238,49 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	# 				break
 
 	# 	self.selectionBeforeCellEdit = shadowSelection
+
+class DataListGroup(object):
+
+	"""
+	A DataListGroup is a partition of model objects that can be presented
+	under a collapsible heading in a GroupListView.
+	"""
+
+	def __init__(self, olv, key, title):
+		self.olv = olv
+		self.key = key
+		self.title = title
+
+		self.modelObjects = list()
+
+	def Add(self, model):
+		"""
+		Add the given model to those that belong to this group.
+		"""
+		self.modelObjects.append(model)
+
+	def IsExpanded(self):
+		"""
+		Returns if this group is expaned or not.
+		"""
+		return self.olv.IsExpanded(self.olv.model.ObjectToItem(self))
+
+	def Expand(self, state = True):
+		"""
+		Expands the group if *state* is True, otherwise collapses it.
+		"""
+		if (state):
+			self.olv.Expand(self)
+			# wx.dataview.DataViewCtrl.Expand(self.olv, self.olv.model.ObjectToItem(self))
+		else:
+			self.olv.Collapse(self)
+			# wx.dataview.DataViewCtrl.Collapse(self.olv, self.olv.model.ObjectToItem(self))
+
+class DataListEmptyGroup(DataListGroup):
+	"""A list group that is empty."""
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
 
 class DataColumnDefn(object):
 	"""
@@ -6766,7 +7000,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		elif (node in self.colorCatalogue):
 			attribute.SetBackgroundColour(self.colorCatalogue[node])
 
-		if (isinstance(node, ListGroup)):
+		if (isinstance(node, DataListGroup)):
 			attribute.SetBold(self.olv.groupFont[0])
 			attribute.SetItalic(self.olv.groupFont[1])
 			attribute.SetColour(self.olv.groupFont[2])
@@ -6781,7 +7015,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def GetChildren(self, parent, children):
 		#Override this so the control can query the child items of an item.
 		#Returns the number of items.
-		_log("@model.GetChildren", parent, children)#, self.olv.modelObjects, self.olv.groups)
+		_log("@model.GetChildren", parent, children, not parent)#, self.olv.modelObjects, self.olv.groups)
 
 		def applyRowColor(rows):
 			if (self.olv.useAlternateBackColors and self.olv.InReportView()):
@@ -6828,12 +7062,15 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# Otherwise we'll fetch the python object associated with the parent
 		# item and make DV items for each of it's child objects.
 		node = self.ItemToObject(parent)
-		if isinstance(node, ListGroup):
+		_log("@model.GetChildren - node:", node)
+		if isinstance(node, DataListGroup):
 			applyGroupColor(node)
 			applyRowColor(node.modelObjects)
 			for row in node.modelObjects:
 				children.append(self.ObjectToItem(row))
+			_log("@model.GetChildren -", len(node.modelObjects))
 			return len(node.modelObjects)
+		_log("@model.GetChildren - None")
 		return 0
 
 	def GetParent(self, item):
@@ -6852,12 +7089,15 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		else:
 			node = item
 
-		if (isinstance(node, ListGroup)):
+		if (isinstance(node, DataListGroup)):
+			_log("@model.GetParent - Null 1")
 			return wx.dataview.NullDataViewItem
 		else:
 			for group in self.olv.groups:
 				if (node in group.modelObjects):
+					_log("@model.GetParent -", group)
 					return self.ObjectToItem(group)
+			_log("@model.GetParent - Null 2")
 			return wx.dataview.NullDataViewItem
 
 	def GetValue(self, item, column):
@@ -6876,7 +7116,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		except AttributeError:
 			raise AttributeError(f"There is no column {column}")
 
-		if (isinstance(node, ListGroup)):
+		if (isinstance(node, DataListGroup)):
 			return node.title
 
 		value = _Munge(node, defn.valueGetter)
@@ -6906,7 +7146,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# to deal with Song objects and cols 1 - 5
 
 		node = self.ItemToObject(item)
-		if (isinstance(node, ListGroup)):
+		if (isinstance(node, DataListGroup)):
 			return True
 
 		try:
@@ -6956,7 +7196,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# and in this model the genre objects are containers
 		node = self.ItemToObject(item)
 		# _log("@model.IsContainer", item, node)
-		if (isinstance(node, ListGroup)):
+		if (isinstance(node, DataListGroup)):
 			return True
 
 
@@ -7019,6 +7259,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		if (parent is None):
 			parent = self.GetParent(item)
+			# self.ItemChanged(parent)
 		if (not isinstance(item, wx.dataview.DataViewItem)):
 			item = self.ObjectToItem(item)
 		return super().ItemAdded(parent, item)
@@ -7045,10 +7286,10 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		_log("@model.ItemsAdded", parent, items)
 
 		if (parent is not None):
-			return super().ItemsAdded(parent, items)
-		
-		for item in items:
-			answer = self.ItemAdded(parent, item)
+			super().ItemsAdded(parent, items)
+		else:
+			for item in items:
+				answer = self.ItemAdded(parent, item)
 		return True
 
 	def ItemsChanged(self, items):
@@ -7123,7 +7364,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		#The items should be compared using their values for the given column.
 		_log("@model.Compare", item1, item2, column, ascending)
 
-		if (isinstance(item1, ListGroup)):
+		if (isinstance(item1, DataListGroup)):
 			if (self.olv.groupCompareFunction != None):
 				return self.olv.groupCompareFunction(self.ItemToObject(item1), self.ItemToObject(item2), column, ascending)
 		else:
