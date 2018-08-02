@@ -349,7 +349,7 @@ class EditCellFinishedEvent(wx.PyCommandEvent):
 	"""
 
 	def __init__(self, objectListView, **kwargs):
-		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_CELL_EDIT_STARTING, -1)
+		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_CELL_EDIT_FINISHED, -1)
 		self.SetEventObject(objectListView)
 		self.objectListView = objectListView
 

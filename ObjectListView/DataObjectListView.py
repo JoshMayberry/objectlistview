@@ -95,7 +95,9 @@ back into the model. See `ColumnDefn` for more information.
 __author__ = "Phillip Piper"
 __date__ = "18 June 2008"
 
+import os
 import wx
+import ast
 import types
 import wx.dataview
 import datetime
@@ -160,6 +162,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.colorOverride = {}
 		self.lastSelected = None
 
+		useWeakRefs 				= kwargs.pop("useWeakRefs", False)
 		self.noHeader 				= kwargs.pop("noHeader", False)
 		self.rowFormatter 			= kwargs.pop("rowFormatter", None)
 		self.singleSelect 			= kwargs.pop("singleSelect", True)
@@ -234,7 +237,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			# if (self.useAlternateBackColors):
 			# 	#Currently only supported by the native GTK and OS X implementations
 			# 	style += "|wx.dataview.DV_ROW_LINES" #Cannot change colors?
-			wx.dataview.DataViewCtrl.__init__(self, *args, style = eval(style), **kwargs)
+			wx.dataview.DataViewCtrl.__init__(self, *args, style = eval(style, {'__builtins__': None, "wx": wx}, {}), **kwargs)
 		else:
 			wx.dataview.DataViewCtrl.__init__(self, *args, style = style, **kwargs)
 
@@ -249,7 +252,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if (isinstance(self.groupFont, wx.Font)):
 			self.groupFont = (self.groupFont.GetWeight() == wx.BOLD, self.groupFont.GetStyle() == wx.ITALIC, wx.Colour(0, 0, 0))
 
-		self.SetModel()
+		self.SetModel(useWeakRefs = useWeakRefs)
 		self.overlayEmptyListMsg = wx.Overlay()
 
 		#Bind Functions
@@ -302,7 +305,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 	#https://stackoverflow.com/questions/32711381/wxpython-wxdataviewlistctrl-get-all-selected-rows-items
 
-	def SetModel(self, model = None):
+	def SetModel(self, model = None, useWeakRefs = True):
 		"""
 		Associates the ListCtrl with the supplied model.
 		If *model* is None, will use *NormalListModel*.
@@ -311,7 +314,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		# Create an instance of our model...
 		if model is None:
-			self.model = NormalListModel(self)
+			self.model = NormalListModel(self, useWeakRefs = useWeakRefs)
 		else:
 			self.model = model
 
@@ -874,7 +877,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 					col.column.SetWidth(boundedWidth)
 
 		# Finally, give each remaining space filling column a proportion of the free space
-		for col in freeColumns:
+		for col in columnsToResize:
 			newWidth = freeSpace * col.freeSpaceProportion / totalProportion
 			boundedWidth = col.CalcBoundedWidth(newWidth)
 			if (col.column.GetWidth() != boundedWidth):
@@ -1393,25 +1396,26 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.GetEventHandler().ProcessEvent(newEvent)
 		if (isinstance(newEvent, DOLVEvent.VetoableEvent)):
 			if (newEvent.IsVetoed()):
-				eventFrom.Veto()
-				return
+				return False
+			return
 		return True
-		eventFrom.Skip()
 
 	def _RelayEvent(self, eventFrom, eventTo):
-		if (self.TriggerEvent(eventTo, **self._getRelayInfo(eventFrom))):
+		answer = self.TriggerEvent(eventTo, **self._getRelayInfo(eventFrom))
+		if (answer):
 			eventFrom.Skip()
-
-		# event = eventTo(self, **self._getRelayInfo(eventFrom))
-		# self.GetEventHandler().ProcessEvent(event)
-		# if (isinstance(event, DOLVEvent.VetoableEvent)):
-		# 	if (event.IsVetoed()):
-		# 		return
-		# eventFrom.Skip()
+		elif (answer != None):
+			eventFrom.Veto()
 
 	def _RelaySelectionChanged(self, relayEvent):
 		#Do not fire this event if that row is already selecetd
-		row = relayEvent.GetModel().ItemToObject(relayEvent.GetItem())
+		try:
+			row = relayEvent.GetModel().ItemToObject(relayEvent.GetItem())
+		except TypeError:
+			#Deselection with no new selection
+			relayEvent.Skip()
+			return
+
 		if (row != self.lastSelected):
 			self.lastSelected = row
 			if (isinstance(row, DataListGroup)):
@@ -1649,7 +1653,7 @@ class DataColumnDefn(object):
 		if (width == None):
 			width = wx.LIST_AUTOSIZE
 
-		return self.column.SetWidth(_Munge(self, width))
+		return self.column.SetWidth(_Munge(self, width, returnMunger_onFail = True))
 
 	def GetAlignment(self):
 		"""
@@ -1676,7 +1680,7 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isSortable = state
 
-		self.column.SetSortable(_Munge(self, self.isSortable))
+		self.column.SetSortable(_Munge(self, self.isSortable, returnMunger_onFail = True))
 
 	def GetSortable(self):
 		return self.column.IsSortable()
@@ -1685,7 +1689,7 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isEditable = state
 
-		if (_Munge(self, self.isEditable)):
+		if (_Munge(self, self.isEditable, returnMunger_onFail = True)):
 			key = "edit"
 		else:
 			key = "nonEdit"
@@ -1699,7 +1703,7 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isReorderable = state
 
-		self.column.SetReorderable(_Munge(self, self.isReorderable))
+		self.column.SetReorderable(_Munge(self, self.isReorderable, returnMunger_onFail = True))
 
 	def GetReorderable(self):
 		return self.column.IsReorderable()
@@ -1708,7 +1712,7 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isResizeable = state
 
-		self.column.SetResizeable(_Munge(self, self.isResizeable))
+		self.column.SetResizeable(_Munge(self, self.isResizeable, returnMunger_onFail = True))
 
 	def GetResizeable(self):
 		return self.column.IsResizeable()
@@ -1717,7 +1721,7 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isHidden = state
 
-		self.column.SetHidden(_Munge(self, self.isHidden))
+		self.column.SetHidden(_Munge(self, self.isHidden, returnMunger_onFail = True))
 
 	def GetHidden(self):
 		return self.column.IsHidden()
@@ -1726,7 +1730,7 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isSpaceFilling = state
 
-		self._isSpaceFilling = _Munge(self, self.isSpaceFilling)
+		self._isSpaceFilling = _Munge(self, self.isSpaceFilling, returnMunger_onFail = True)
 
 	def GetSpaceFilling(self):
 		return self._isSpaceFilling
@@ -1868,9 +1872,9 @@ class DataColumnDefn(object):
 		Applies the provided renderer
 		"""
 		global rendererCatalogue
-		_log("@DataColumnDefn.SetRenderer", renderer, args, kwargs)
+		_log("@DataColumnDefn.SetRenderer", renderer, args, kwargs) 
 
-		renderer = _Munge(self, renderer)
+		renderer = _Munge(self, renderer, returnMunger_onFail = True)
 		try:
 			self.renderer = rendererCatalogue[renderer]["class"](*args, **kwargs)
 		except (AttributeError, KeyError):
@@ -1981,7 +1985,7 @@ def _SetValueUsingMunger(modelObject, value, munger, shouldInvokeCallable):
 	except:
 		pass
 
-def _Munge(modelObject, munger, returnMunger_onFail = True):
+def _Munge(modelObject, munger, returnMunger_onFail = False):
 	"""
 	Wrest some value from the given modelObject using the munger.
 	With a description like that, you know this method is going to be obscure :-)
@@ -2032,6 +2036,18 @@ def _Munge(modelObject, munger, returnMunger_onFail = True):
 			return munger
 		else:
 			return None
+
+def _window_to_bitmap(window):
+	"""
+	Makes a bmp of what a wxWindow looks like.
+	Code from FogleBird on https://stackoverflow.com/questions/4773961/get-a-widgets-dc-in-wxpython
+	"""
+	width, height = window.GetSize()
+	bitmap = wx.EmptyBitmap(width, height)
+	wdc = wx.WindowDC(window)
+	mdc = wx.MemoryDC(bitmap)
+	mdc.Blit(0, 0, width, height, wdc, 0, 0)
+	return bitmap
 
 def _drawText(dc, rectangle = wx.Rect(0, 0, 100, 100), text = "", isSelected = False, x_offset = 0, y_offset = 0, align = None, color = None, font = None):
 	"""Draw a simple text label in appropriate colors.
@@ -2200,7 +2216,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	"""Displays like an ObjectListView or GroupListView."""
 	#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewItemObjectMapper.html
 
-	def __init__(self, olv):
+	def __init__(self, olv, useWeakRefs = True):
 		wx.dataview.PyDataViewModel.__init__(self)
 		self.olv = olv
 		self.colorCatalogue = {}
@@ -2211,6 +2227,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	#     # so any Python object can be used as data nodes. If the data nodes
 	#     # are weak-referencable then the objmapper can use a
 	#     # WeakValueDictionary instead.
+		# self.UseWeakRefs(useWeakRefs)
 		self.UseWeakRefs(True)
 
 	def GetAttr(self, item, column, attribute):
@@ -2329,7 +2346,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def GetValue(self, item, column, alternateGetter = None):
 		#Override this to indicate the value of item.
 		#A Variant is used to store the data.
-		# _log("@model.GetValue", item, column)
+		# _log("@model.GetValue", item, column, alternateGetter)
 
 		# Return the value to be displayed for this item and column. For this
 		# example we'll just pull the values from the data objects we
@@ -2349,9 +2366,19 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			value = _Munge(node, alternateGetter)
 		else:
 			value = _Munge(node, defn.valueGetter)
-		if (isinstance(defn.renderer, (wx.dataview.DataViewProgressRenderer, wx.dataview.DataViewSpinRenderer, Renderer_Spin, Renderer_Bmp, 
-			wx.dataview.DataViewBitmapRenderer, wx.dataview.DataViewToggleRenderer, Renderer_Button, Renderer_Progress))):
-				return value
+
+		# print("@model.GetValue", defn.renderer, node.__repr__(), defn.valueGetter, value, defn.stringConverter)
+
+		if (isinstance(defn.renderer, (Renderer_Text, wx.dataview.DataViewTextRenderer,
+			Renderer_Choice, wx.dataview.DataViewChoiceRenderer))):
+			return _StringToValue(value, defn.stringConverter)
+
+		elif (isinstance(defn.renderer, (Renderer_Spin, wx.dataview.DataViewSpinRenderer,
+			wx.dataview.DataViewProgressRenderer, Renderer_Progress))):
+			try:
+				return int(value)
+			except TypeError:
+				return 0
 		
 		elif (isinstance(defn.renderer, (wx.dataview.DataViewIconTextRenderer, Renderer_Icon))):
 			return wx.dataview.DataViewIconText(text = value[0], icon = value[1])
@@ -2363,13 +2390,16 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			else:
 				return [image] * value
 
-		return _StringToValue(value, defn.stringConverter)
+		elif (isinstance(defn.renderer, Renderer_Button)):
+			return [node, defn, value]
+		return value
 
 	def SetValue(self, value, item, column):
 		# This gets called in order to set a value in the data model.
 		# The most common scenario is that the wx.dataview.DataViewCtrl calls this method after the user changed some data in the view.
 		# This is the function you need to override in your derived class but if you want to call it, ChangeValue is usually more convenient as otherwise you need to manually call ValueChanged to update the control itself.
 		_log("@model.SetValue", value, item, column)
+		print("@model.SetValue", value, item, column)
 
 		# We're not allowing edits in column zero (see below) so we just need
 		# to deal with Song objects and cols 1 - 5
@@ -2659,7 +2689,7 @@ class Renderer_MultiImage(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def GetValue(self):
-		_log("@Renderer_MultiImage.GetValue")
+		# _log("@Renderer_MultiImage.GetValue")
 		return self.value
 
 	def GetSize(self):
@@ -2682,20 +2712,42 @@ class Renderer_MultiImage(wx.dataview.DataViewCustomRenderer):
 
 class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 	"""
-	When pressed, runs the function returned by by *valueGetter* for the assigned *ColumnDefn*.
-	This means that *valueGetter* should be a function that returns a function.
-	For simplicity, you can use `lambda: yourFunction`.
+	Depending on what *text* and *function* initially are will determine how 
+	the value returned by by *valueGetter* for the assigned *ColumnDefn* is used.
+		- *text* == None and *function* == None: The value should be a list, where the first element is 
+			the text to display and the second element is the function to run.
+		- *text* != None and *function* == None: The value should be a function that returns a function.
+			If it is only a function, _Munge will run it.
+			For simplicity, you can use `lambda: yourFunction`.
+		- *text* == None and *function* != None: The value returned should be the text to display.
+		- *text* != None and *function* != None: The value returned will be passed to *function* as
+			a third parameter.
+	In all cases, the function should accept the following parameters: objectModel, columnIndex
+
+	The Button can be drawn with the wxNativeRenderer if *useNativeRenderer* is True.
+	If it is None, Only text will be drawn.
 	"""
 
-	def __init__(self, text = "", mode = wx.dataview.DATAVIEW_CELL_ACTIVATABLE, useNativeRenderer = False, **kwargs):
-		_log("@Renderer_Button.__init__", text, mode, kwargs)
-
+	def __init__(self, text = None, function = None, useNativeRenderer = False, mode = wx.dataview.DATAVIEW_CELL_ACTIVATABLE, **kwargs):
+		# _log("@Renderer_Button.__init__", text, function, useNativeRenderer, mode, kwargs)
 		wx.dataview.DataViewCustomRenderer.__init__(self, mode = mode, **kwargs)
 		self.type = "button"
-		self.buildingKwargs = {**kwargs, "text": text, "mode": mode}
+		self.buildingKwargs = {**kwargs, "text": text, "function": function, "useNativeRenderer": useNativeRenderer, "mode": mode}
 		
-		self.value = None
+		if (text == None):
+			if (function == None):
+				self.SetValue = self.SetValue_both
+			else:
+				self.SetValue = self.SetValue_text
+		else:
+			if (function == None):
+				self.SetValue = self.SetValue_function
+			else:
+				self.LeftClick = self.LeftClick_extraArg
+				self.Activate = self.Activate_extraArg
+
 		self.text = text
+		self.function = function
 		self.useNativeRenderer = useNativeRenderer
 
 	def Clone(self, **kwargs):
@@ -2703,42 +2755,278 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
 
+	def SetValue_both(self, value):
+		# _log("@Renderer_Button.SetValue_both", value)
+		self._node = value[0]
+		self._column = value[1]
+		self._text = value[2][0]
+		self._function = value[2][1]
+		return True
+
+	def SetValue_function(self, value):
+		# _log("@Renderer_Button.SetValue_function", value)
+		self._node = value[0]
+		self._column = value[1]
+		self._function = value[2]
+		self._text = _Munge(self._node, self.text, returnMunger_onFail = True)
+		return True
+
+	def SetValue_text(self, value):
+		# _log("@Renderer_Button.SetValue_text", value)
+		self._node = value[0]
+		self._column = value[1]
+		self._function = _Munge(self._node, self.function, returnMunger_onFail = True)
+		self._text = value[2]
+		return True
+
 	def SetValue(self, value):
-		# _log("@Renderer_Button.SetValue", value)
-		self.value = value
+		# print("@Renderer_Button.SetValue", value, self.function, self.text)
+		self._node = value[0]
+		self._column = value[1]
+		self._function = _Munge(self._node, self.function, returnMunger_onFail = True)
+		self._text = _Munge(self._node, self.text, returnMunger_onFail = True)
+		self.extraArg = value[2]
 		return True
 
 	def GetValue(self):
-		_log("@Renderer_Button.GetValue")
-		return self.value
+		# _log("@Renderer_Button.GetValue")
+		return self.function
 
 	def GetSize(self):
 		# _log("@Renderer_Button.GetSize")
 		return (-1, -1)
 
 	def Render(self, rectangle, dc, state):
-		# _log("@Renderer_Button.Render", rectangle, dc, state, self.value)
+		# print("@Renderer_Button.Render", rectangle, dc, state, self._text, self._function)
 
 		isSelected = state == wx.dataview.DATAVIEW_CELL_SELECTED
-		if (self.useNativeRenderer):
+
+		useNativeRenderer = _Munge(self._node, self.useNativeRenderer, returnMunger_onFail = True)
+		if (useNativeRenderer):
 			#Use: https://github.com/wxWidgets/wxPython/blob/master/demo/RendererNative.py
 			wx.RendererNative.Get().DrawPushButton(self.GetOwner().GetOwner(), dc, rectangle, state)
-		else:
+		elif (useNativeRenderer != None):
 			rectangle.Deflate(2, 2)
 			_drawButton(dc, rectangle, isSelected)
-		if (self.text):
-			_drawText(dc, rectangle, self.text, isSelected, align = "center")
+
+		if (self._text):
+			_drawText(dc, rectangle, self._text, isSelected, align = "center" if (useNativeRenderer != None) else "left")
 		return True
 
-	def LeftClick(self, pos, cellRect, model, item, col):
-		_log("@Renderer_Button.LeftClick", pos, cellRect, model, item, col)
-		self.value()
+	def LeftClick(self, clickPos, cellRect, model, item, columnIndex):
+		# _log("@Renderer_Button.LeftClick", clickPos, cellRect, model, item, columnIndex)
+		self._function(model.ItemToObject(item), columnIndex)
 		return True
 
-	def Activate(self, cellRect, model, item, col):
-		_log("@Renderer_Button.Activate", cellRect, model, item, col)
-		self.value()
+	def Activate(self, cellRect, model, item, columnIndex):
+		# _log("@Renderer_Button.Activate", cellRect, model, item, columnIndex)
+		self._function(model.ItemToObject(item), columnIndex)
 		return True
+
+	def LeftClick_extraArg(self, clickPos, cellRect, model, item, columnIndex):
+		# _log("@Renderer_Button.LeftClick", clickPos, cellRect, model, item, columnIndex)
+		self._function(model.ItemToObject(item), columnIndex, self.extraArg)
+		return True
+
+	def Activate_extraArg(self, cellRect, model, item, columnIndex):
+		# _log("@Renderer_Button.Activate", cellRect, model, item, columnIndex)
+		self._function(model.ItemToObject(item), columnIndex, self.extraArg)
+		return True
+
+class Renderer_File(wx.dataview.DataViewCustomRenderer):
+	"""
+	Uses a file picker or directory picker as the editor.
+	The value returned by *valueGetter* is a filepath.
+	"""
+
+	def __init__(self, *args, message = "", directoryOnly = False, openFile = True,
+		wildcard = "All files (*.*)|*.*", changeDir = False, single = False, preview = False,
+		mustExist = False, confirm = True, **kwargs):
+		_log("@Renderer_File.__init__", kwargs)
+
+		wx.dataview.DataViewCustomRenderer.__init__(self, **kwargs)
+		self.type = "file"
+
+		self.buildingKwargs = {**kwargs, "message": message, "changeDir": changeDir, 
+			"mustExist": mustExist, "wildcard": wildcard, "confirm": confirm, "single": single, "preview": preview}
+		
+		self.message = message
+		self.changeDir = changeDir
+
+		if (directoryOnly):
+			self.single = True
+			self.mustExist = mustExist
+			self.CreateEditorCtrl = self.CreateEditorCtrl_dirOnly
+		else:
+			self.preview = preview
+			self.wildcard = wildcard
+			if (openFile):
+				self.single = single
+				self.mustExist = mustExist
+			else:
+				self.single = True
+				self.confirm = confirm
+				self.CreateEditorCtrl = self.CreateEditorCtrl_save
+
+		self.value = None
+
+	def Clone(self, **kwargs):
+		#Any keywords in kwargs will override keywords in buildingKwargs
+		instructions = {**self.buildingKwargs, **kwargs}
+		return super().__self_class__(**instructions)
+
+	def SetValue(self, value):
+		self.value = value
+		return True
+
+	def GetValue(self):
+		return self.value
+
+	def GetSize(self):
+		return (-1, -1)
+
+	def Render(self, rectangle, dc, state):
+		isSelected = state == wx.dataview.DATAVIEW_CELL_SELECTED
+
+		if (not self.single):
+			value = ", ".join(self.value)
+		else:
+			value = self.value
+
+		_drawText(dc, rectangle, value, isSelected, align = "left")
+		return True
+
+	def HasEditorCtrl(self):
+		return False
+
+	def GetValueFromEditorCtrl(self, editor):
+		value = editor.GetValue()
+		if (not self.single):
+			value = ast.literal_eval(f"['{value.lstrip('[').rstrip(']')}']")
+		return value
+
+	def CreateEditorCtrl(self, parent, labelRect, value):
+		#Show Dialog
+		style = ["wx.FD_OPEN"]
+		if (self.changeDir):
+			style.append("wx.FD_CHANGE_DIR")
+		if (self.mustExist):
+			style.append("wx.FD_FILE_MUST_EXIST")
+		if (not self.single):
+			style.append("wx.FD_MULTIPLE")
+		if (self.preview):
+			style.append("wx.FD_PREVIEW")
+		style = "|".join(style)
+
+		if (self.single):
+			checkValue = value
+		else:
+			try:
+				checkValue = value[0]
+			except IndexError:
+				checkValue = ""
+
+		if (os.path.exists(os.path.dirname(checkValue))):
+			defaultDir = os.path.dirname(checkValue)
+		else:
+			defaultDir = ""
+
+		if (os.path.exists(os.path.basename(checkValue))):
+			defaultFile = os.path.basename(checkValue)
+		else:
+			defaultFile = ""
+
+		with wx.FileDialog(parent, self.message, defaultDir = defaultDir, defaultFile = defaultFile,
+			wildcard = self.wildcard, style = eval(style, {'__builtins__': None, "wx": wx}, {})) as fileDialog:
+
+			if (fileDialog.ShowModal() == wx.ID_CANCEL):
+				value = value
+			elif (self.single):
+				value = fileDialog.GetPath()
+			else:
+				value = ", ".join(fileDialog.GetPaths())
+
+		#Create ctrl
+		ctrl = wx.TextCtrl(parent, value = value, pos = labelRect.Position, size = labelRect.Size)
+		ctrl.SetInsertionPointEnd()
+		ctrl.SelectAll()
+
+		return ctrl
+
+	def CreateEditorCtrl_save(self, parent, labelRect, value):
+		#Show Dialog
+		style = ["wx.FD_SAVE"]
+		if (self.changeDir):
+			style.append("wx.FD_CHANGE_DIR")
+		if (self.confirm):
+			style.append("wx.FD_OVERWRITE_PROMPT")
+		if (self.preview):
+			style.append("wx.FD_PREVIEW")
+		style = "|".join(style)
+
+		if (self.single):
+			checkValue = value
+		else:
+			try:
+				checkValue = value[0]
+			except IndexError:
+				checkValue = ""
+
+		if (os.path.exists(os.path.dirname(checkValue))):
+			defaultDir = os.path.dirname(checkValue)
+		else:
+			defaultDir = ""
+
+		if (os.path.exists(os.path.basename(checkValue))):
+			defaultFile = os.path.basename(checkValue)
+		else:
+			defaultFile = ""
+
+		with wx.FileDialog(parent, self.message, defaultDir = defaultDir, defaultFile = defaultFile,
+			wildcard = self.wildcard, style = eval(style, {'__builtins__': None, "wx": wx}, {})) as fileDialog:
+
+			if (fileDialog.ShowModal() == wx.ID_CANCEL):
+				value = value
+			elif (self.single):
+				value = fileDialog.GetPath()
+			else:
+				value = ", ".join(fileDialog.GetPaths())
+
+		#Create ctrl
+		ctrl = wx.TextCtrl(parent, value = value, pos = labelRect.Position, size = labelRect.Size)
+		ctrl.SetInsertionPointEnd()
+		ctrl.SelectAll()
+
+		return ctrl
+
+	def CreateEditorCtrl_dirOnly(self, parent, labelRect, value):
+		#Show Dialog
+		style = ["wx.DD_DEFAULT_STYLE "]
+		if (self.changeDir):
+			style.append("wx.DD_CHANGE_DIR")
+		if (self.mustExist):
+			style.append("wx.DD_DIR_MUST_EXIST")
+		style = "|".join(style)
+
+		if (os.path.exists(value)):
+			defaultDir = value
+		else:
+			defaultDir = ""
+
+		with wx.DirDialog(parent, self.message, defaultPath = defaultDir, defaultFile = defaultFile,
+			wildcard = self.wildcard, style = eval(style, {'__builtins__': None, "wx": wx}, {})) as fileDialog:
+
+			if (fileDialog.ShowModal() == wx.ID_CANCEL):
+				value = value
+			else:
+				value = fileDialog.GetPath()
+
+		#Create ctrl
+		ctrl = wx.TextCtrl(parent, value = value, pos = labelRect.Position, size = labelRect.Size)
+		ctrl.SetInsertionPointEnd()
+		ctrl.SelectAll()
+
+		return ctrl
 
 class Renderer_CheckBox(wx.dataview.DataViewToggleRenderer):
 	"""
@@ -2762,10 +3050,12 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 	Renders a simple progress bar.
 	The bar can be customized by passing in 'color', or for more control 'pen' and 'brush' can also be passed in.
 	All three can be callable functions that return a color, pen, and brush respectively.
-	'minimum' and 'maximum' can also be callable functions that return integers.
+	'minimum' and 'maximum' can also be callable functions that return integers. 
+	They must accept Renderer_Progress as a read-only parameter.
 
 	'editor' determines what type of editor is used to change the value of the progress bar.
 	Possible editors are: "text" for a wxTextCtrl, "spin" for a wxSpinCtrl, and "slider" for a wxSlider.
+	Alternatively, instead of text, a wxWindow can be given. That wxWindow will be used instead of a pre-defined one.
 	"""
 
 	def __init__(self, minimum = 0, maximum = 100, editor = "slider",
@@ -2808,17 +3098,11 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 		self.buildingKwargs["color"] = color
 
 	def SetPen(self, pen = None):
-		if ((pen is None) and (not callable(self.color))):
-			self.pen = wx.Pen(wx.BLACK, 1)
-		else:
-			self.pen = pen
+		self.pen = pen
 		self.buildingKwargs["pen"] = pen
 
 	def SetBrush(self, brush = None):
-		if ((brush is None) and (not callable(self.color))):
-			self.brush = wx.Brush(self.color)
-		else:
-			self.brush = brush
+		self.brush = brush
 		self.buildingKwargs["brush"] = brush
 
 	def SetValue(self, value):
@@ -2840,37 +3124,22 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 	def Render(self, rectangle, dc, state):
 		# _log("@Renderer_Progress.Render", rectangle, dc, state, self.value)
 
-		if (callable(self.pen)):
-			pen = self.pen()
-		else:
-			pen = self.pen
+		pen = _Munge(self, self.pen, returnMunger_onFail = True)
 		if (pen is None):
 			pen = wx.Pen(wx.BLACK, 1)
 
-		if (callable(self.brush)):
-			brush = self.brush()
-		else:
-			brush = self.brush
+		brush = _Munge(self, self.brush, returnMunger_onFail = True)
 		if (brush is None):
-			if (callable(self.color)):
-				color = self.color()
-			else:
-				color = self.color
+			color = _Munge(self, self.color, returnMunger_onFail = True)
 			if (color is None):
 				color = wx.BLUE
 			brush = wx.Brush(color)
 
-		if (callable(self.minimum)):
-			minimum = self.minimum()
-		else:
-			minimum = self.minimum
+		minimum = _Munge(self, self.minimum, returnMunger_onFail = True)
 		if (minimum is None):
 			minimum = 0
 
-		if (callable(self.maximum)):
-			maximum = self.maximum()
-		else:
-			maximum = self.maximum
+		maximum = _Munge(self, self.maximum, returnMunger_onFail = True)
 		if (maximum is None):
 			maximum = 100
 
@@ -2893,31 +3162,29 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 
 	def CreateEditorCtrl(self, parent, labelRect, value):
 		# _log("@Renderer_Progress.CreateEditorCtrl", parent, labelRect, value)
-		
-		if (self.editor.lower() == "text"):
-			ctrl = wx.TextCtrl(parent, value = str(value), pos = labelRect.Position, size = labelRect.Size)
-			ctrl.SetInsertionPointEnd()
-			ctrl.SelectAll()
 
-		else:
-			if (callable(self.minimum)):
-				minimum = self.minimum()
-			else:
-				minimum = self.minimum
-			if (minimum is None):
-				minimum = 0
+		editor = _Munge(self, self.editor, returnMunger_onFail = True)
+		try:
+			if (editor.lower() == "text"):
+				ctrl = wx.TextCtrl(parent, value = str(value), pos = labelRect.Position, size = labelRect.Size)
+				ctrl.SetInsertionPointEnd()
+				ctrl.SelectAll()
 
-			if (callable(self.maximum)):
-				maximum = self.maximum()
 			else:
-				maximum = self.maximum
-			if (maximum is None):
-				maximum = 100
+				minimum = _Munge(self, self.minimum, returnMunger_onFail = True)
+				if (minimum is None):
+					minimum = 0
 
-			if (self.editor.lower() == "slider"):
-				ctrl = wx.Slider(parent, value = int(value), minValue = int(minimum), maxValue = int(maximum), pos = labelRect.Position, size = labelRect.Size)
-			else:
-				ctrl = wx.SpinCtrl(parent, pos = labelRect.Position, size = labelRect.Size, min = int(minimum), max = int(maximum), initial = int(value))
+				maximum = _Munge(self, self.maximum, returnMunger_onFail = True)
+				if (maximum is None):
+					maximum = 100
+
+				if (editor.lower() == "slider"):
+					ctrl = wx.Slider(parent, value = int(value), minValue = int(minimum), maxValue = int(maximum), pos = labelRect.Position, size = labelRect.Size)
+				else:
+					ctrl = wx.SpinCtrl(parent, pos = labelRect.Position, size = labelRect.Size, min = int(minimum), max = int(maximum), initial = int(value))
+		except:
+			ctrl = editor
 
 		return ctrl
 
@@ -2982,33 +3249,108 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 	"""
 	"""
 
-	def __init__(self, **kwargs):
+	def __init__(self, editor = None, password = False, **kwargs):
 		_log("@Renderer_Text.__init__", kwargs)
 
 		wx.dataview.DataViewTextRenderer.__init__(self, **kwargs)
 		self.type = "text"
-		self.buildingKwargs = {**kwargs}
+		self.buildingKwargs = {**kwargs, "password": password}
+
+		self.SetEditor(editor)
+		self.password = password
 
 	def Clone(self, **kwargs):
 		#Any keywords in kwargs will override keywords in buildingKwargs
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
+
+	def SetEditor(self, editor = None):
+		self.editor = editor
+		self.buildingKwargs["editor"] = editor
+
+	def HasEditorCtrl(self):
+		# _log("@Renderer_Text.HasEditorCtrl")
+		return True
+
+	def CreateEditorCtrl(self, parent, labelRect, value):
+		# _log("@Renderer_Text.CreateEditorCtrl", parent, labelRect, value)
+
+		editor = _Munge(self, self.editor, returnMunger_onFail = True)
+		if (editor):
+			return editor
+
+		if (self.password):
+			style = "wx.TE_PASSWORD"
+		else:
+			style = "0"
+
+		ctrl = wx.TextCtrl(parent, value = str(value), pos = labelRect.Position, size = labelRect.Size, style = eval(style, {'__builtins__': None, "wx": wx}, {}))
+		ctrl.SetInsertionPointEnd()
+		ctrl.SelectAll()
+		return ctrl
 
 class Renderer_Spin(wx.dataview.DataViewSpinRenderer):
 	"""
 	"""
 
-	def __init__(self, minimum = 0, maximum = 10, **kwargs):
+	def __init__(self, minimum = 0, maximum = 100, base = 10, editor = None, **kwargs):
 		_log("@Renderer_Spin.__init__", kwargs)
 
 		wx.dataview.DataViewSpinRenderer.__init__(self, minimum, maximum, **kwargs)
 		self.type = "spin"
-		self.buildingKwargs = {**kwargs, "minimum": minimum, "maximum": maximum}
+		self.buildingKwargs = {**kwargs}
+
+		self.SetEditor(editor)
+		self.SetMax(minimum)
+		self.SetMin(maximum)
+		self.SetBase(base)
 
 	def Clone(self, **kwargs):
 		#Any keywords in kwargs will override keywords in buildingKwargs
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
+
+	def SetEditor(self, editor = None):
+		self.editor = editor
+		self.buildingKwargs["editor"] = editor
+
+	def SetMax(self, maximum = None):
+		self.maximum = maximum or 100
+		self.buildingKwargs["maximum"] = maximum
+
+	def SetMin(self, minimum = None):
+		self.minimum = minimum or 0
+		self.buildingKwargs["minimum"] = minimum
+
+	def SetBase(self, base = None):
+		self.base = base or 0
+		self.buildingKwargs["base"] = base
+
+	def HasEditorCtrl(self):
+		# _log("@Renderer_Spin.HasEditorCtrl")
+		return True
+
+	def CreateEditorCtrl(self, parent, labelRect, value):
+		# _log("@Renderer_Spin.CreateEditorCtrl", parent, labelRect, value)
+
+		editor = _Munge(self, self.editor, returnMunger_onFail = True)
+		if (editor):
+			return editor
+
+		minimum = _Munge(self, self.minimum, returnMunger_onFail = True)
+		if (minimum is None):
+			minimum = 0
+
+		maximum = _Munge(self, self.maximum, returnMunger_onFail = True)
+		if (maximum is None):
+			maximum = 100
+
+		ctrl = wx.SpinCtrl(parent, pos = labelRect.Position, size = labelRect.Size, min = minimum, max = maximum, initial = value)
+
+		base = _Munge(self, self.base, returnMunger_onFail = True)
+		if ((base != None) and (base != 10)):
+			ctrl.SetBase(base)
+		return ctrl
 
 class Renderer_Bmp(wx.dataview.DataViewBitmapRenderer):
 	"""
@@ -3042,7 +3384,6 @@ class Renderer_Icon(wx.dataview.DataViewIconTextRenderer):
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
 
-
 rendererCatalogue = {
 	None:        {"edit": wx.dataview.DATAVIEW_CELL_EDITABLE, 		"nonEdit": wx.dataview.DATAVIEW_CELL_ACTIVATABLE, 	"class": Renderer_Text},
 	"text":      {"edit": wx.dataview.DATAVIEW_CELL_EDITABLE, 		"nonEdit": wx.dataview.DATAVIEW_CELL_ACTIVATABLE, 	"class": Renderer_Text},
@@ -3054,5 +3395,6 @@ rendererCatalogue = {
 	"multi_bmp": {"edit": wx.dataview.DATAVIEW_CELL_ACTIVATABLE, 	"nonEdit": wx.dataview.DATAVIEW_CELL_INERT, 		"class": Renderer_MultiImage},
 	"button":    {"edit": wx.dataview.DATAVIEW_CELL_ACTIVATABLE, 	"nonEdit": wx.dataview.DATAVIEW_CELL_INERT, 		"class": Renderer_Button},
 	"choice":    {"edit": wx.dataview.DATAVIEW_CELL_EDITABLE, 		"nonEdit": wx.dataview.DATAVIEW_CELL_ACTIVATABLE, 	"class": Renderer_Choice},
+	"file":      {"edit": wx.dataview.DATAVIEW_CELL_EDITABLE, 		"nonEdit": wx.dataview.DATAVIEW_CELL_ACTIVATABLE, 	"class": Renderer_File},
 }
 
