@@ -356,10 +356,11 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewCtrl.html#wx.dataview.DataViewCtrl.AppendColumn
 		defn.SetEditable()
 		defn.column = wx.dataview.DataViewColumn(defn.title, defn.renderer, index or len(self.columns) - 1, width = defn.width, align = defn.GetAlignment())
-		defn.SetSortable()
-		defn.SetReorderable()
-		defn.SetResizeable()
 		defn.SetHidden()
+		defn.SetSortable()
+		defn.SetResizeable()
+		defn.SetReorderable()
+		defn.SetSpaceFilling()
 
 		if (index):
 			self.InsertColumn(index, defn.column)
@@ -841,36 +842,39 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if (not self.InReportView()):
 			return
 
+		visibleColumns = set(x for x in self.columns.values() if not x.GetHidden())
+		fixedColumns = set(x for x in visibleColumns if not x.GetSpaceFilling())
+		freeColumns = visibleColumns - fixedColumns
+
 		# Don't do anything if there are no space filling columns
-		if (True not in set(x.isSpaceFilling for x in self.columns.values())):
+		if (not freeColumns):
 			return
 
 		# Calculate how much free space is available in the control
-		totalFixedWidth = sum(x.column.GetWidth() for x in self.columns.values() if not x.isSpaceFilling)
+		totalFixedWidth = sum(x.column.GetWidth() for x in fixedColumns)
 		if ('phoenix' in wx.PlatformInfo):
 			freeSpace = max(0, self.GetClientSize()[0] - totalFixedWidth)
 		else:
 			freeSpace = max(0, self.GetClientSizeTuple()[0] - totalFixedWidth)
 
 		# Calculate the total number of slices the free space will be divided into
-		totalProportion = sum(x.freeSpaceProportion for x in self.columns.values() if x.isSpaceFilling)
+		totalProportion = sum(x.freeSpaceProportion for x in freeColumns)
 
 		# Space filling columns that would escape their boundary conditions are treated as fixed size columns
 		columnsToResize = []
-		for i, col in self.columns.items():
-			if (col.isSpaceFilling):
-				newWidth = freeSpace * col.freeSpaceProportion / totalProportion
-				boundedWidth = col.CalcBoundedWidth(newWidth)
-				if (newWidth == boundedWidth):
-					columnsToResize.append(col)
-				else:
-					freeSpace -= boundedWidth
-					totalProportion -= col.freeSpaceProportion
-					if (col.column.GetWidth() != boundedWidth):
-						col.column.SetWidth(boundedWidth)
+		for col in freeColumns:
+			newWidth = freeSpace * col.freeSpaceProportion / totalProportion
+			boundedWidth = col.CalcBoundedWidth(newWidth)
+			if (newWidth == boundedWidth):
+				columnsToResize.append(col)
+			else:
+				freeSpace -= boundedWidth
+				totalProportion -= col.freeSpaceProportion
+				if (col.column.GetWidth() != boundedWidth):
+					col.column.SetWidth(boundedWidth)
 
 		# Finally, give each remaining space filling column a proportion of the free space
-		for col in columnsToResize:
+		for col in freeColumns:
 			newWidth = freeSpace * col.freeSpaceProportion / totalProportion
 			boundedWidth = col.CalcBoundedWidth(newWidth)
 			if (col.column.GetWidth() != boundedWidth):
@@ -1535,16 +1539,16 @@ class DataColumnDefn(object):
 			isReorderable=True,
 			isResizeable=True,
 			isHidden=False,
+			isSpaceFilling=False,
+			isSearchable=True,
 			fixedWidth=None,
 			minimumWidth=-1,
 			maximumWidth=-1,
-			isSpaceFilling=False,
 			cellEditorCreator=None,
 			autoCompleteCellEditor=False,
 			autoCompleteComboBoxCellEditor=False,
 			checkStateGetter=None,
 			checkStateSetter=None,
-			isSearchable=True,
 			useBinarySearch=None,
 			headerImage=-1,
 			groupKeyGetter=None,
@@ -1569,6 +1573,7 @@ class DataColumnDefn(object):
 		self.stringConverter = stringConverter
 		self.valueSetter = valueSetter
 		self.isSpaceFilling = isSpaceFilling
+		self._isSpaceFilling = False #Allows _Munge to be used for isSpaceFilling
 		self.cellEditorCreator = cellEditorCreator
 		self.freeSpaceProportion = 1
 		self.isEditable = isEditable
@@ -1644,7 +1649,7 @@ class DataColumnDefn(object):
 		if (width == None):
 			width = wx.LIST_AUTOSIZE
 
-		return self.column.SetWidth(width)
+		return self.column.SetWidth(_Munge(self, width))
 
 	def GetAlignment(self):
 		"""
@@ -1671,52 +1676,60 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isSortable = state
 
-		self.column.SetSortable(self.isSortable)
+		self.column.SetSortable(_Munge(self, self.isSortable))
 
-	def GetSortable():
-		return self.column.GetSortable()
+	def GetSortable(self):
+		return self.column.IsSortable()
 
 	def SetEditable(self, state = None):
 		if (state is not None):
 			self.isEditable = state
 
-		if (self.isEditable):
+		if (_Munge(self, self.isEditable)):
 			key = "edit"
 		else:
 			key = "nonEdit"
 
 		self.SetRenderer(self.renderer.Clone(mode = rendererCatalogue[self.renderer.type][key]))
 
-	def GetEditable():
+	def GetEditable(self):
 		return self.renderer.Mode == rendererCatalogue[self.renderer.type]["edit"]
 
 	def SetReorderable(self, state = None):
 		if (state is not None):
 			self.isReorderable = state
 
-		self.column.SetReorderable(self.isReorderable)
+		self.column.SetReorderable(_Munge(self, self.isReorderable))
 
-	def GetReorderable():
-		return self.column.GetReorderable()
+	def GetReorderable(self):
+		return self.column.IsReorderable()
 
 	def SetResizeable(self, state = None):
 		if (state is not None):
 			self.isResizeable = state
 
-		self.column.SetResizeable(self.isResizeable)
+		self.column.SetResizeable(_Munge(self, self.isResizeable))
 
-	def GetResizeable():
-		return self.column.GetResizeable()
+	def GetResizeable(self):
+		return self.column.IsResizeable()
 
 	def SetHidden(self, state = None):
 		if (state is not None):
 			self.isHidden = state
 
-		self.column.SetHidden(self.isHidden)
+		self.column.SetHidden(_Munge(self, self.isHidden))
 
-	def GetHidden():
-		return self.column.GetHidden()
+	def GetHidden(self):
+		return self.column.IsHidden()
 
+	def SetSpaceFilling(self, state = None):
+		if (state is not None):
+			self.isSpaceFilling = state
+
+		self._isSpaceFilling = _Munge(self, self.isSpaceFilling)
+
+	def GetSpaceFilling(self):
+		return self._isSpaceFilling
 
 	#-------------------------------------------------------------------------
 	# Value accessing
@@ -1726,7 +1739,7 @@ class DataColumnDefn(object):
 		Return the value for this column from the given modelObject
 		"""
 		_log("@DataColumnDefn.GetValue", modelObject)
-		return self._Munge(modelObject, self.valueGetter)
+		return _Munge(modelObject, self.valueGetter)
 
 	def GetStringValue(self, modelObject):
 		"""
@@ -1771,7 +1784,7 @@ class DataColumnDefn(object):
 		if self.groupKeyGetter is None:
 			key = self.GetValue(modelObject)
 		else:
-			key = self._Munge(modelObject, self.groupKeyGetter)
+			key = _Munge(modelObject, self.groupKeyGetter)
 		if self.useInitialLetterForGroupKey:
 			try:
 				return key[:1].upper()
@@ -1812,115 +1825,17 @@ class DataColumnDefn(object):
 		"""
 		_log("@DataColumnDefn.SetValue", modelObject, value)
 		if self.valueSetter is None:
-			return self._SetValueUsingMunger(
+			return _SetValueUsingMunger(
 				modelObject,
 				value,
 				self.valueGetter,
 				False)
 		else:
-			return self._SetValueUsingMunger(
+			return _SetValueUsingMunger(
 				modelObject,
 				value,
 				self.valueSetter,
 				True)
-
-	def _SetValueUsingMunger(
-			self,
-			modelObject,
-			value,
-			munger,
-			shouldInvokeCallable):
-		"""
-		Look for ways to update modelObject with value using munger. If munger finds a
-		callable, it will be called if shouldInvokeCallable == True.
-		"""
-		# If there isn't a munger, we can't do anything
-		if munger is None:
-			return
-
-		# Is munger a function?
-		if callable(munger):
-			if shouldInvokeCallable:
-				munger(modelObject, value)
-			return
-
-		# Try indexed access for dictionary or list like objects
-		try:
-			modelObject[munger] = value
-			return
-		except:
-			pass
-
-		# Is munger the name of some slot in the modelObject?
-		try:
-			attr = getattr(modelObject, munger)
-		except TypeError:
-			return
-		except AttributeError:
-			return
-
-		# Is munger the name of a method?
-		if callable(attr):
-			if shouldInvokeCallable:
-				attr(value)
-			return
-
-		# If we get to here, it seems that munger is the name of an attribute or
-		# property on modelObject. Try to set, realising that many things could
-		# still go wrong.
-		try:
-			setattr(modelObject, munger, value)
-		except:
-			pass
-
-	def _Munge(self, modelObject, munger):
-		"""
-		Wrest some value from the given modelObject using the munger.
-		With a description like that, you know this method is going to be obscure :-)
-
-		'munger' can be:
-
-		1) a callable.
-		   This method will return the result of executing 'munger' with 'modelObject' as its parameter.
-
-		2) the name of an attribute of the modelObject.
-		   If that attribute is callable, this method will return the result of executing that attribute.
-		   Otherwise, this method will return the value of that attribute.
-
-		3) an index (string or integer) onto the modelObject.
-		   This allows dictionary-like objects and list-like objects to be used directly.
-		"""
-		if munger is None:
-			return None
-
-		# THINK: The following code treats an instance variable with the value of None
-		# as if it doesn't exist. Is that best?
-
-		# Try attribute access
-		try:
-			attr = getattr(modelObject, munger, None)
-			if attr is not None:
-				try:
-					return attr()
-				except TypeError:
-					return attr
-		except TypeError:
-			# Happens when munger is not a string
-			pass
-
-		# Use the callable directly, if possible.
-		# In accordance with Guido's rules for Python 3, we just call it and catch the
-		# exception
-		try:
-			return munger(modelObject)
-		except TypeError:
-			pass
-
-		# Try dictionary-like indexing
-		try:
-			return modelObject[munger]
-		except:
-			return None
 
 	#-------------------------------------------------------------------------
 	# Width management
@@ -1955,6 +1870,7 @@ class DataColumnDefn(object):
 		global rendererCatalogue
 		_log("@DataColumnDefn.SetRenderer", renderer, args, kwargs)
 
+		renderer = _Munge(self, renderer)
 		try:
 			self.renderer = rendererCatalogue[renderer]["class"](*args, **kwargs)
 		except (AttributeError, KeyError):
@@ -2065,7 +1981,7 @@ def _SetValueUsingMunger(modelObject, value, munger, shouldInvokeCallable):
 	except:
 		pass
 
-def _Munge(modelObject, munger):
+def _Munge(modelObject, munger, returnMunger_onFail = True):
 	"""
 	Wrest some value from the given modelObject using the munger.
 	With a description like that, you know this method is going to be obscure :-)
@@ -2112,7 +2028,10 @@ def _Munge(modelObject, munger):
 	try:
 		return modelObject[munger]
 	except:
-		return None
+		if (returnMunger_onFail):
+			return munger
+		else:
+			return None
 
 def _drawText(dc, rectangle = wx.Rect(0, 0, 100, 100), text = "", isSelected = False, x_offset = 0, y_offset = 0, align = None, color = None, font = None):
 	"""Draw a simple text label in appropriate colors.
