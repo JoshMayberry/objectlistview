@@ -414,6 +414,25 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		# self.model.ItemChanged(model)
 		self.model.Cleared()
 
+	def SetFilter(self, myFilter, repopulate = True):
+		"""
+		Remember the filter that is currently operating on this control.
+		Set this to None to clear the current filter.
+
+		A filter is a callable that accepts one parameter: the original list
+		of model objects. The filter chooses which of these model objects should
+		be visible to the user, and returns a collection of only those objects.
+
+		The Filter module has some useful standard filters.
+		(https://filters.readthedocs.io/en/latest/)
+
+		You must call RepopulateList() for changes to the filter to be visible.
+		"""
+		self.filter = myFilter
+
+		if (repopulate):
+			self.RepopulateList()
+
 	#-------------------------------------------------------------------------
 	# Accessing
 
@@ -427,6 +446,23 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		If no filter is in effect, this is the same as GetFilteredObjects().
 		"""
 		return self.modelObjects
+
+	def GetFilteredObjects(self):
+		if (not self.filter):
+			return self.GetObjects()
+		return self.filter(self.modelObjects)
+
+	def GetFilter(self):
+		"""
+		Return the filter that is currently operating on this control.
+		"""
+		return self.filter
+
+	def GetGroups(self):
+		return self.groups
+
+	def GetEmptyGroups(self):
+		return [group for group in self.groups if (not group.modelObjects)]
 
 	def GetColumns(self):
 		"""
@@ -916,13 +952,64 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			self.RebuildGroups(preserveExpansion = preserveExpansion)
 			self.model.ItemsAdded(None, modelObjects)
 		finally:
-			pass
 			self.Thaw()
 
 		if (self.showGroups):
 			#Groups not updating children correctly, but rebuilding it all over again fixes it
 			#TO DO: Fix self.model.ItemsAdded for groups
 			self.model.Cleared()
+
+	def RemoveObject(self, modelObject):
+		"""
+		Remove the given object from our collection of objects.
+		"""
+		self.RemoveObjects([modelObject])
+
+	def RemoveObjects(self, modelObjects, preserveExpansion = True):
+		"""
+		Remove the given collections of objects from our collection of objects.
+		"""
+
+		try:
+			self.Freeze()
+
+			removedObjects = []
+			for item in modelObjects:
+				if (item in self.modelObjects):
+					self.modelObjects.remove(item)
+					removedObjects.append(item)
+
+			self.RebuildGroups(preserveExpansion = preserveExpansion)
+			self.model.ItemsDeleted(None, removedObjects)
+		finally:
+			self.Thaw()
+
+		if (self.showGroups):
+			#Groups not updating children correctly, but rebuilding it all over again fixes it
+			#TO DO: Fix self.model.ItemsDeleted for groups
+			self.model.Cleared()
+
+
+		# # Unlike AddObjects(), there is no clever way to do this -- we have to simply
+		# # remove the objects and rebuild the whole list. We can't just remove the rows
+		# # because every wxListItem holds the index of its matching model object. If we
+		# # remove the first model object, the index of every object will change.
+		# selection = self.GetSelectedObjects()
+
+		# # Use sets to quickly remove objects from self.modelObjects
+		# # For large collections, this is MUCH faster.
+		# try:
+		# 	s1 = set(self.modelObjects)
+		# 	s2 = set(modelObjects)
+		# 	self.modelObjects = list(s1 - s2)
+		# except TypeError:
+		# 	# Not every object can be hashed, so some model objects cannot be placed in sets.
+		# 	# For such objects, we have to resort to the slow method.
+		# 	for x in modelObjects:
+		# 		self.modelObjects.remove(x)
+
+		# self.RepopulateList()
+		# self.SelectObjects(selection)
 
 	def EnsureVisible(self, modelObject, column = None):
 		"""
@@ -991,8 +1078,8 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		_log("@DataObjectListView._BuildGroups", modelObjects)
 		if (modelObjects is None):
 			modelObjects = self.modelObjects
-		if (self.filter):
-			modelObjects = self.filter(modelObjects)
+		# if (self.filter):
+		# 	modelObjects = self.filter(modelObjects)
 
 		if (preserveExpansion):
 			expanded = {}
@@ -2049,7 +2136,7 @@ def _window_to_bitmap(window):
 	mdc.Blit(0, 0, width, height, wdc, 0, 0)
 	return bitmap
 
-def _drawText(dc, rectangle = wx.Rect(0, 0, 100, 100), text = "", isSelected = False, x_offset = 0, y_offset = 0, align = None, color = None, font = None):
+def _drawText(dc, rectangle = wx.Rect(0, 0, 100, 100), text = "", isSelected = False, isEnabled = True, x_offset = 0, y_offset = 0, align = None, color = None, font = None):
 	"""Draw a simple text label in appropriate colors.
 	Special thanks to Milan Skala for how to center text on http://wxpython-users.1045709.n5.nabble.com/Draw-text-over-an-existing-bitmap-td5725527.html
 
@@ -2067,12 +2154,13 @@ def _drawText(dc, rectangle = wx.Rect(0, 0, 100, 100), text = "", isSelected = F
 		if (color != None):
 			color = tuple(min(255, max(0, item)) for item in color) #Ensure numbers are between 0 and 255
 		else:
-			if (isSelected):
+			if (not isEnabled):
+				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT)
+			elif (isSelected):
 				#Use: https://wxpython.org/Phoenix/docs/html/wx.SystemColour.enumeration.html
-				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT)
-				# color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHTTEXT)
+				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHTTEXT)
 			else:
-				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT)
+				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNTEXT)
 		dc.SetTextForeground(color)
 
 		if (font != None):
@@ -2271,14 +2359,19 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 					else:
 						self.colorCatalogue[row] = self.olv.evenRowsBackColor
 
-		def applyGroupColor(group):
+		def applyGroupColor(group, rows):
 			if (self.olv.useAlternateBackColors and self.olv.InReportView()):
 				if (self.olv.groupBackColor != None):
 					if (index in self.olv.colorOverride):
 						self.colorCatalogue[group] = self.olv.colorOverride[index]
 					else:
 						self.colorCatalogue[group] = self.olv.groupBackColor
-				applyRowColor(group.modelObjects)
+				applyRowColor(rows)
+
+		def applyRowFilter(rows):
+			if (self.olv.filter):
+				return self.olv.filter(rows)
+			return rows
 
 		# The view calls this method to find the children of any node in the
 		# control. There is an implicit hidden root node, and the top level
@@ -2290,30 +2383,33 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# If the parent item is invalid then it represents the hidden root
 		# item, so we'll use the genre objects as its children and they will
 		# end up being the collection of visible roots in our tree.
-		if not parent:
+		if (not parent):
 			if (self.olv.showGroups):
+				shownGroups = 0
 				for group in self.olv.groups:
-					applyGroupColor(group)
+					rowList = applyRowFilter(group.modelObjects)
+					if ((not rowList) and (group.key not in self.olv.emptyGroups)):
+						continue
+					shownGroups += 1
+					applyGroupColor(group, rowList)
 					children.append(self.ObjectToItem(group))
-				return len(self.olv.groups)
+				return shownGroups
 			else:
-				applyRowColor(self.olv.modelObjects)
-				for row in self.olv.modelObjects:
+				rowList = applyRowFilter(self.olv.modelObjects)
+				applyRowColor(rowList)
+				for row in rowList:
 					children.append(self.ObjectToItem(row))
-				return len(self.olv.modelObjects)
+				return len(rowList)
 
 		# Otherwise we'll fetch the python object associated with the parent
 		# item and make DV items for each of it's child objects.
 		node = self.ItemToObject(parent)
-		_log("@model.GetChildren - node:", node)
-		if isinstance(node, DataListGroup):
-			applyGroupColor(node)
-			applyRowColor(node.modelObjects)
-			for row in node.modelObjects:
+		if (isinstance(node, DataListGroup)):
+			rowList = applyRowFilter(node.modelObjects)
+			applyGroupColor(node, rowList)
+			for row in rowList:
 				children.append(self.ObjectToItem(row))
-			_log("@model.GetChildren -", len(node.modelObjects))
-			return len(node.modelObjects)
-		_log("@model.GetChildren - None")
+			return len(rowList)
 		return 0
 
 	def GetParent(self, item):
@@ -2399,7 +2495,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# The most common scenario is that the wx.dataview.DataViewCtrl calls this method after the user changed some data in the view.
 		# This is the function you need to override in your derived class but if you want to call it, ChangeValue is usually more convenient as otherwise you need to manually call ValueChanged to update the control itself.
 		_log("@model.SetValue", value, item, column)
-		print("@model.SetValue", value, item, column)
 
 		# We're not allowing edits in column zero (see below) so we just need
 		# to deal with Song objects and cols 1 - 5
@@ -2521,7 +2616,13 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			# self.ItemChanged(parent)
 		if (not isinstance(item, wx.dataview.DataViewItem)):
 			item = self.ObjectToItem(item)
-		return super().ItemAdded(parent, item)
+
+		#Account for filter
+		try:
+			return super().ItemAdded(parent, item)
+		except wx._core.wxAssertionError:
+			#The filter has removed the item from the list
+			return True
 
 	def ItemChanged(self, item):
 		#Call this to inform the model that an item has changed.
@@ -2722,17 +2823,21 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		- *text* == None and *function* != None: The value returned should be the text to display.
 		- *text* != None and *function* != None: The value returned will be passed to *function* as
 			a third parameter.
+
 	In all cases, the function should accept the following parameters: objectModel, columnIndex
+
+	- *enabled* != None: Determines if the button is enabled or not. 
+		If *enabled* == None, if the column is editable or not will be used for this.
 
 	The Button can be drawn with the wxNativeRenderer if *useNativeRenderer* is True.
 	If it is None, Only text will be drawn.
 	"""
 
-	def __init__(self, text = None, function = None, useNativeRenderer = False, mode = wx.dataview.DATAVIEW_CELL_ACTIVATABLE, **kwargs):
+	def __init__(self, text = None, function = None, enabled = None, useNativeRenderer = False, mode = wx.dataview.DATAVIEW_CELL_ACTIVATABLE, **kwargs):
 		# _log("@Renderer_Button.__init__", text, function, useNativeRenderer, mode, kwargs)
 		wx.dataview.DataViewCustomRenderer.__init__(self, mode = mode, **kwargs)
 		self.type = "button"
-		self.buildingKwargs = {**kwargs, "text": text, "function": function, "useNativeRenderer": useNativeRenderer, "mode": mode}
+		self.buildingKwargs = {**kwargs, "text": text, "function": function, "enabled": enabled, "useNativeRenderer": useNativeRenderer, "mode": mode}
 		
 		if (text == None):
 			if (function == None):
@@ -2744,9 +2849,9 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 				self.SetValue = self.SetValue_function
 			else:
 				self.LeftClick = self.LeftClick_extraArg
-				self.Activate = self.Activate_extraArg
 
 		self.text = text
+		self.enabled = enabled
 		self.function = function
 		self.useNativeRenderer = useNativeRenderer
 
@@ -2761,6 +2866,11 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self._column = value[1]
 		self._text = value[2][0]
 		self._function = value[2][1]
+
+		if (self.enabled != None):
+			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
+		else:
+			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
 		return True
 
 	def SetValue_function(self, value):
@@ -2769,6 +2879,11 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self._column = value[1]
 		self._function = value[2]
 		self._text = _Munge(self._node, self.text, returnMunger_onFail = True)
+
+		if (self.enabled != None):
+			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
+		else:
+			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
 		return True
 
 	def SetValue_text(self, value):
@@ -2777,6 +2892,11 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self._column = value[1]
 		self._function = _Munge(self._node, self.function, returnMunger_onFail = True)
 		self._text = value[2]
+
+		if (self.enabled != None):
+			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
+		else:
+			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
 		return True
 
 	def SetValue(self, value):
@@ -2786,6 +2906,11 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self._function = _Munge(self._node, self.function, returnMunger_onFail = True)
 		self._text = _Munge(self._node, self.text, returnMunger_onFail = True)
 		self.extraArg = value[2]
+
+		if (self.enabled != None):
+			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
+		else:
+			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
 		return True
 
 	def GetValue(self):
@@ -2800,37 +2925,38 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		# print("@Renderer_Button.Render", rectangle, dc, state, self._text, self._function)
 
 		isSelected = state == wx.dataview.DATAVIEW_CELL_SELECTED
-
 		useNativeRenderer = _Munge(self._node, self.useNativeRenderer, returnMunger_onFail = True)
 		if (useNativeRenderer):
 			#Use: https://github.com/wxWidgets/wxPython/blob/master/demo/RendererNative.py
-			wx.RendererNative.Get().DrawPushButton(self.GetOwner().GetOwner(), dc, rectangle, state)
+
+			style = []
+			if (isSelected):
+				style.append("wx.CONTROL_SELECTED")
+			if (not self._enabled):
+				style.append("wx.CONTROL_DISABLED")
+			# if (self._isPressed):
+			# 	style.append("wx.CONTROL_PRESSED")
+			style = "|".join(style)
+
+			wx.RendererNative.Get().DrawPushButton(self.GetOwner().GetOwner(), dc, rectangle, eval(style, {'__builtins__': None, "wx": wx}, {}))
 		elif (useNativeRenderer != None):
 			rectangle.Deflate(2, 2)
 			_drawButton(dc, rectangle, isSelected)
 
 		if (self._text):
-			_drawText(dc, rectangle, self._text, isSelected, align = "center" if (useNativeRenderer != None) else "left")
+			_drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, align = "center" if (useNativeRenderer != None) else "left")
 		return True
 
 	def LeftClick(self, clickPos, cellRect, model, item, columnIndex):
 		# _log("@Renderer_Button.LeftClick", clickPos, cellRect, model, item, columnIndex)
-		self._function(model.ItemToObject(item), columnIndex)
-		return True
-
-	def Activate(self, cellRect, model, item, columnIndex):
-		# _log("@Renderer_Button.Activate", cellRect, model, item, columnIndex)
-		self._function(model.ItemToObject(item), columnIndex)
+		if (self._enabled):
+			self._function(model.ItemToObject(item), columnIndex)
 		return True
 
 	def LeftClick_extraArg(self, clickPos, cellRect, model, item, columnIndex):
 		# _log("@Renderer_Button.LeftClick", clickPos, cellRect, model, item, columnIndex)
-		self._function(model.ItemToObject(item), columnIndex, self.extraArg)
-		return True
-
-	def Activate_extraArg(self, cellRect, model, item, columnIndex):
-		# _log("@Renderer_Button.Activate", cellRect, model, item, columnIndex)
-		self._function(model.ItemToObject(item), columnIndex, self.extraArg)
+		if (self._enabled):
+			self._function(model.ItemToObject(item), columnIndex, self.extraArg)
 		return True
 
 class Renderer_File(wx.dataview.DataViewCustomRenderer):
