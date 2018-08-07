@@ -1078,8 +1078,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		_log("@DataObjectListView._BuildGroups", modelObjects)
 		if (modelObjects is None):
 			modelObjects = self.modelObjects
-		# if (self.filter):
-		# 	modelObjects = self.filter(modelObjects)
 
 		if (preserveExpansion):
 			expanded = {}
@@ -1239,25 +1237,35 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if (resortNow):
 			self.model.Resort()
 
-	def SetCompareFunction(self, function):
+	def SetCompareFunction(self, function, repopulate = True):
 		"""
 		Allows the user to use a different compare function for sorting items.
+		You can set this to None to use the default compare function again.
 
 		The comparison function must accept two model objects as two parameters, the column it is in as another, and if the order is ascending as one more.
 		ie: myCompare(item1, item2, column, ascending)
 		The comparison function should return negative, null or positive value depending on whether the first item is less than, equal to or greater than the second one.
+		If it returns None, the default compare function will be used.
 		"""
 		self.compareFunction = function
 
-	def SetGroupCompareFunction(self, function):
+		if (repopulate):
+			self.RepopulateList()
+
+	def SetGroupCompareFunction(self, function, repopulate = True):
 		"""
 		Allows the user to use a different compare function for sorting groups.
+		You can set this to None to use the default compare function again.
 
 		The comparison function must accept two DataListGroup objects as two parameters, the column it is in as another, and if the order is ascending as one more.
 		ie: myCompare(item1, item2, column, ascending)
 		The comparison function should return negative, null or positive value depending on whether the first item is less than, equal to or greater than the second one.
+		If it returns None, the default compare function will be used.
 		"""
 		self.groupCompareFunction = function
+
+		if (repopulate):
+			self.RepopulateList()
 
 	#Editing
 	# def _PossibleStartCellEdit(self, rowIndex, subItemIndex):
@@ -1406,8 +1414,19 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if ((not self.GetSortingColumn()) or (column.IsSortOrderAscending())):
 			event.Skip()
 		else:
+			index = column.GetModelColumn()
+			columnHandle = self.columns.get(column.GetModelColumn(), None)
+
+			event = DOLVEvent.SortingEvent(self, columnHandle, index, None)
+			self.GetEventHandler().ProcessEvent(event)
+			if (event.wasHandled or event.IsVetoed()):
+				return
+
+			self.model.sortCounter = None
 			column.UnsetAsSortKey() #`UnsetAsSortKey` is the reverse of SetSortOrder and is called to indicate that this column is not used for sorting any longer.
 			self.model.Cleared()
+
+			self.TriggerEvent(DOLVEvent.SortedEvent, column = columnHandle, index = index, ascending = None)
 
 	def _HandleSize(self, event):
 		"""
@@ -2309,12 +2328,15 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		self.olv = olv
 		self.colorCatalogue = {}
 
-	#     # The PyDataViewModel derives from both DataViewModel and from
-	#     # DataViewItemObjectMapper, which has methods that help associate
-	#     # data view items with Python objects. Normally a dictionary is used
-	#     # so any Python object can be used as data nodes. If the data nodes
-	#     # are weak-referencable then the objmapper can use a
-	#     # WeakValueDictionary instead.
+		self.sortCounter = None
+		self.sort_colorCatalogue = {}
+
+		# The PyDataViewModel derives from both DataViewModel and from
+		# DataViewItemObjectMapper, which has methods that help associate
+		# data view items with Python objects. Normally a dictionary is used
+		# so any Python object can be used as data nodes. If the data nodes
+		# are weak-referencable then the objmapper can use a
+		# WeakValueDictionary instead.
 		# self.UseWeakRefs(useWeakRefs)
 		self.UseWeakRefs(True)
 
@@ -2324,12 +2346,20 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# _log("@model.GetAttr", item, column, attribute)
 		# return super().GetAttr(item, column, attribute)
 
-		changed = False
 		node = self.ItemToObject(item)
 		if (node in self.olv.colorOverride):
 			attribute.SetBackgroundColour(self.olv.colorOverride[node])
-		elif (node in self.colorCatalogue):
-			attribute.SetBackgroundColour(self.colorCatalogue[node])
+		else:
+			if (self.sortCounter != None):
+				if (node not in self.sort_colorCatalogue):
+					if (self.sortCounter % 2):
+						self.sort_colorCatalogue[node] = self.olv.evenRowsBackColor
+					else:
+						self.sort_colorCatalogue[node] = self.olv.oddRowsBackColor
+					self.sortCounter += 1
+				attribute.SetBackgroundColour(self.sort_colorCatalogue[node])
+			elif (node in self.colorCatalogue):
+				attribute.SetBackgroundColour(self.colorCatalogue[node])
 
 		if (isinstance(node, DataListGroup)):
 			attribute.SetBold(self.olv.groupFont[0])
@@ -2337,11 +2367,9 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			attribute.SetColour(self.olv.groupFont[2])
 
 		if (self.olv.rowFormatter is not None):
-			self.olv.rowFormatter(item, node)
+			self.olv.rowFormatter(node, column, attribute)
 
-		if (changed):
-			return True
-		return False
+		return True
 
 	def GetChildren(self, parent, children):
 		#Override this so the control can query the child items of an item.
@@ -2354,10 +2382,10 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 					#Determine row color outside of virtual function for speed
 					if (index in self.olv.colorOverride):
 						self.colorCatalogue[row] = self.olv.colorOverride[index]
-					elif (index & 1):
-						self.colorCatalogue[row] = self.olv.oddRowsBackColor
-					else:
+					elif (index % 2):
 						self.colorCatalogue[row] = self.olv.evenRowsBackColor
+					else:
+						self.colorCatalogue[row] = self.olv.oddRowsBackColor
 
 		def applyGroupColor(group, rows):
 			if (self.olv.useAlternateBackColors and self.olv.InReportView()):
@@ -2370,7 +2398,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		def applyRowFilter(rows):
 			if (self.olv.filter):
-				return self.olv.filter(rows)
+				return list(self.olv.filter(rows))
 			return rows
 
 		# The view calls this method to find the children of any node in the
@@ -2684,8 +2712,14 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		except AttributeError as error:
 			event = DOLVEvent.SortingEvent(self.olv, None, -1, None)
 		self.olv.GetEventHandler().ProcessEvent(event)
-		if (not (event.wasHandled or event.IsVetoed())):
-			return super().Resort()
+		if (event.wasHandled or event.IsVetoed()):
+			return
+
+		#Fix row colors
+		self.sortCounter = 0
+		self.sort_colorCatalogue = {}
+
+		return super().Resort()
 
 	def GetSortValue(self, item, column):
 		"""Returns the value to be used for sorting."""
@@ -2723,21 +2757,26 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		#The items should be compared using their values for the given column.
 		_log("@model.Compare", item1, item2, column, ascending)
 
-		if (isinstance(item1, DataListGroup)):
+		answer = None
+		node1 = self.ItemToObject(item1)
+		node2 = self.ItemToObject(item2)
+		if (isinstance(node1, DataListGroup)):
 			if (self.olv.groupCompareFunction != None):
-				return self.olv.groupCompareFunction(self.ItemToObject(item1), self.ItemToObject(item2), column, ascending)
+				answer = self.olv.groupCompareFunction(node1, node2, column, ascending)
 		else:
 			if (self.olv.compareFunction != None):
-				return self.olv.compareFunction(self.ItemToObject(item1), self.ItemToObject(item2), column, ascending)
-		
+				answer = self.olv.compareFunction(node1, node2, column, ascending)
+		if (answer != None):
+			return answer
+
 		value1 = self.GetSortValue(item1, column)
 		value2 = self.GetSortValue(item2, column)
 
 		#The builtin function cmp is depricated now
 		#Account for None being a value
-		if ((value1 is None, value1) > (value2 is None, value2)):
+		if ((value1 is None, value1) < (value2 is None, value2)):
 			return (1, -1)[ascending]
-		elif ((value1 is None, value1) < (value2 is None, value2)):
+		elif ((value1 is None, value1) > (value2 is None, value2)):
 			return (-1, 1)[ascending]
 		else:
 			return 0
