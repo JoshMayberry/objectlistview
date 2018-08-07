@@ -177,14 +177,14 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.foregroundColor 		= kwargs.pop("foregroundColor", None)
 		
 		#Sorting
-		self.groups = []
-		self.emptyGroups = []
-		
+		self.sortable 				= kwargs.pop("sortable", True)
+		self.caseSensative 			= kwargs.pop("caseSensative", True)
+		self.compareFunction		= kwargs.pop("compareFunction", None)
+		self.unsortedFunction 		= kwargs.pop("unsortedFunction", None)
+		self.groupCompareFunction 	= kwargs.pop("groupCompareFunction", None)
+
+		#Filtering
 		self.filter 					= kwargs.pop("filter", None)
-		self.sortable 					= kwargs.pop("sortable", True)
-		self.caseSensative 				= kwargs.pop("caseSensative", True)
-		self.compareFunction			= kwargs.pop("compareFunction", None)
-		self.groupCompareFunction 		= kwargs.pop("groupCompareFunction", None)
 		self.typingSearchesSortColumn	= kwargs.pop("typingSearchesSortColumn", True)
 
 		#Editing
@@ -199,6 +199,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.whenLastTypingEvent = 0
 
 		#Groups
+		self.groups = []
+		self.emptyGroups = []
+
 		self.groupTitle 				= kwargs.pop("groupTitle", "")
 		self.showGroups 				= kwargs.pop("showGroups", False)
 		self.showItemCounts 			= kwargs.pop("showItemCounts", True)
@@ -693,7 +696,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		Calling this automatically put the control into ShowGroup mode
 		"""
-		self.modelObjects = list()
 		self.SetShowGroups(True)
 		self._SetGroups(groups)
 
@@ -817,7 +819,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			return
 
 		# Expand/collapse the groups
-		for x in event.groups:
+		for x in groups:
 			if (isExpanding):
 				super().Expand(self.model.ObjectToItem(x))
 			else:
@@ -949,7 +951,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		try:
 			self.Freeze()
 			self.modelObjects.extend(modelObjects)
-			self.RebuildGroups(preserveExpansion = preserveExpansion)
+			self.UpdateUnsorted(preserveExpansion = preserveExpansion)
 			self.model.ItemsAdded(None, modelObjects)
 		finally:
 			self.Thaw()
@@ -988,28 +990,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			#Groups not updating children correctly, but rebuilding it all over again fixes it
 			#TO DO: Fix self.model.ItemsDeleted for groups
 			self.model.Cleared()
-
-
-		# # Unlike AddObjects(), there is no clever way to do this -- we have to simply
-		# # remove the objects and rebuild the whole list. We can't just remove the rows
-		# # because every wxListItem holds the index of its matching model object. If we
-		# # remove the first model object, the index of every object will change.
-		# selection = self.GetSelectedObjects()
-
-		# # Use sets to quickly remove objects from self.modelObjects
-		# # For large collections, this is MUCH faster.
-		# try:
-		# 	s1 = set(self.modelObjects)
-		# 	s2 = set(modelObjects)
-		# 	self.modelObjects = list(s1 - s2)
-		# except TypeError:
-		# 	# Not every object can be hashed, so some model objects cannot be placed in sets.
-		# 	# For such objects, we have to resort to the slow method.
-		# 	for x in modelObjects:
-		# 		self.modelObjects.remove(x)
-
-		# self.RepopulateList()
-		# self.SelectObjects(selection)
 
 	def EnsureVisible(self, modelObject, column = None):
 		"""
@@ -1058,16 +1038,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			return
 
 		groups = self._BuildGroups(preserveExpansion = preserveExpansion)
-		# self.SortGroups(groups)
 		self._SetGroups(groups)
-
-	def _SetGroups(self, groups):
-		"""
-		Present the collection of DataListGroups in this control.
-		"""
-		_log("@DataObjectListView._SetGroups", groups)
-		self.groups = groups
-		self.RepopulateList()
 
 	def _BuildGroups(self, modelObjects = None, preserveExpansion = True):
 		"""
@@ -1124,6 +1095,14 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		return event.groups
 
+	def _SetGroups(self, groups):
+		"""
+		Present the collection of DataListGroups in this control.
+		"""
+		_log("@DataObjectListView._SetGroups", groups)
+		self.groups = groups
+		self.RepopulateList()
+
 	def _BuildGroupTitles(self, groups, groupingColumn):
 		"""
 		Rebuild the titles of the given groups
@@ -1131,35 +1110,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		_log("@DataObjectListView._BuildGroupTitles", groups, groupingColumn)
 		for x in groups:
 			x.title = groupingColumn.GetGroupTitle(x, self.GetShowItemCounts())
-
-	# def _BuildInnerList(self):
-	# 	"""
-	# 	Build the list that will be used to populate the ListCtrl.
-
-	# 	This internal list is an amalgum of model objects, DataListGroups
-	# 	and None (which are blank rows).
-	# 	"""
-	# 	_log("@DataObjectListView._BuildInnerList")
-	# 	self.objectToIndexMap = None
-	# 	if not self.showGroups:
-	# 		return ObjectListView._BuildInnerList(self)
-
-	# 	if not self.modelObjects:
-	# 		self.groups = list()
-	# 		self.innerList = list()
-	# 		return
-
-	# 	if self.groups is None:
-	# 		self.groups = self._BuildGroups()
-	# 		self.SortGroups()
-
-	# 	self.innerList = list()
-	# 	for grp in self.groups:
-	# 		if len(self.innerList) and self.putBlankLineBetweenGroups:
-	# 			self.innerList.append(None)
-	# 		self.innerList.append(grp)
-	# 		if grp.IsExpanded():
-	# 			self.innerList.extend(grp.modelObjects)
 
 	# ---Sorting-------------------------------------------------------#000000#FFFFFF
 
@@ -1236,6 +1186,22 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		
 		if (resortNow):
 			self.model.Resort()
+
+	def UpdateUnsorted(self, preserveExpansion = True):
+		if (self.unsortedFunction):
+			self.modelObjects = self.unsortedFunction(self.modelObjects)
+			self.RebuildGroups(preserveExpansion = preserveExpansion)
+
+	def SetUnsortedFunction(self, function, repopulate = True):
+		"""
+		Allows the user to define an order for the unsorted list.
+		If None, the order of the items given will be used.
+		Setting this to None will not change the defined order of objects already added.
+		"""
+		self.unsortedFunction = function
+
+		if (repopulate):
+			self.RepopulateList()
 
 	def SetCompareFunction(self, function, repopulate = True):
 		"""
@@ -1781,6 +1747,9 @@ class DataColumnDefn(object):
 		}.get(self.align[:1], wx.ALIGN_LEFT)
 
 		return alignment
+
+	def GetIndex(self):
+		return self.column.GetModelColumn()
 
 	def SetSortable(self, state = None):
 		if (state is not None):
@@ -2762,10 +2731,10 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		node2 = self.ItemToObject(item2)
 		if (isinstance(node1, DataListGroup)):
 			if (self.olv.groupCompareFunction != None):
-				answer = self.olv.groupCompareFunction(node1, node2, column, ascending)
+				answer = self.olv.groupCompareFunction(node1, node2, self.olv.columns[column], ascending)
 		else:
 			if (self.olv.compareFunction != None):
-				answer = self.olv.compareFunction(node1, node2, column, ascending)
+				answer = self.olv.compareFunction(node1, node2, self.olv.columns[column], ascending)
 		if (answer != None):
 			return answer
 
@@ -2981,21 +2950,23 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		elif (useNativeRenderer != None):
 			rectangle.Deflate(2, 2)
 			_drawButton(dc, rectangle, isSelected)
+			rectangle.Deflate(2, 0)
 
 		if (self._text):
-			_drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, align = "center" if (useNativeRenderer != None) else "left")
+			_drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, align = "left")
+			# _drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, align = "center" if (useNativeRenderer != None) else "left")
 		return True
 
 	def LeftClick(self, clickPos, cellRect, model, item, columnIndex):
 		# _log("@Renderer_Button.LeftClick", clickPos, cellRect, model, item, columnIndex)
 		if (self._enabled):
-			self._function(model.ItemToObject(item), columnIndex)
+			self._function(model.ItemToObject(item), model.olv.columns[columnIndex])
 		return True
 
 	def LeftClick_extraArg(self, clickPos, cellRect, model, item, columnIndex):
 		# _log("@Renderer_Button.LeftClick", clickPos, cellRect, model, item, columnIndex)
 		if (self._enabled):
-			self._function(model.ItemToObject(item), columnIndex, self.extraArg)
+			self._function(model.ItemToObject(item), model.olv.columns[columnIndex], self.extraArg)
 		return True
 
 class Renderer_File(wx.dataview.DataViewCustomRenderer):

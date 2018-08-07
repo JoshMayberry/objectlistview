@@ -161,7 +161,7 @@ class GroupCreationEvent(wx.PyCommandEvent):
 	(that last behaviour could be very confusing for the users).
 	"""
 
-	def __init__(self, objectListView, groups):
+	def __init__(self, objectListView, groups = []):
 		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_GROUP_CREATING, -1)
 		self.SetEventObject(objectListView)
 		self.objectListView = objectListView
