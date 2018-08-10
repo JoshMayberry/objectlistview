@@ -42,17 +42,22 @@ def _EventMaker():
 (olv_EVT_DATA_REORDER, EVT_DATA_REORDER) = _EventMaker()
 
 (olv_EVT_DATA_GROUP_CREATING, EVT_DATA_GROUP_CREATING) = _EventMaker()
+(olv_EVT_DATA_MENU_CREATING, EVT_DATA_MENU_CREATING) = _EventMaker()
+(olv_EVT_DATA_MENU_ITEM_SELECTED, EVT_DATA_MENU_ITEM_SELECTED) = _EventMaker()
 
 (olv_EVT_DATA_EXPANDING, EVT_DATA_EXPANDING) = _EventMaker()
 (olv_EVT_DATA_EXPANDED, EVT_DATA_EXPANDED) = _EventMaker()
 (olv_EVT_DATA_COLLAPSING, EVT_DATA_COLLAPSING) = _EventMaker()
 (olv_EVT_DATA_COLLAPSED, EVT_DATA_COLLAPSED) = _EventMaker()
 
+(olv_EVT_DATA_CELL_LEFT_CLICK, EVT_DATA_CELL_LEFT_CLICK) = _EventMaker()
+(olv_EVT_DATA_CELL_RIGHT_CLICK, EVT_DATA_CELL_RIGHT_CLICK) = _EventMaker()
+(olv_EVT_DATA_CELL_ACTIVATED, EVT_DATA_CELL_ACTIVATED) = _EventMaker()
+
 (olv_EVT_DATA_SELECTION_CHANGED, EVT_DATA_SELECTION_CHANGED) = _EventMaker()
 (olv_EVT_DATA_GROUP_SELECTED, EVT_DATA_GROUP_SELECTED) = _EventMaker()
-(olv_EVT_DATA_CELL_CONTEXT_MENU, EVT_DATA_CELL_CONTEXT_MENU) = _EventMaker()
-(olv_EVT_DATA_CELL_ACTIVATED, EVT_DATA_CELL_ACTIVATED) = _EventMaker()
-(olv_EVT_DATA_COLUMN_HEADER_CLICK, EVT_DATA_COLUMN_HEADER_CLICK) = _EventMaker()
+
+(olv_EVT_DATA_COLUMN_HEADER_LEFT_CLICK, EVT_DATA_COLUMN_HEADER_LEFT_CLICK) = _EventMaker()
 (olv_EVT_DATA_COLUMN_HEADER_RIGHT_CLICK, EVT_DATA_COLUMN_HEADER_RIGHT_CLICK) = _EventMaker()
 
 #======================================================================
@@ -96,13 +101,26 @@ class SelectionChangedEvent(wx.PyCommandEvent):
 		self.objectListView = objectListView
 		self.row = kwargs.pop("row", None)
 
-class CellContextMenuEvent(wx.PyCommandEvent):
+class CellLeftClickEvent(wx.PyCommandEvent):
 	"""
-	The context menu for a cell will appear.
+	A cell has been left-clicked.
 	"""
 
 	def __init__(self, objectListView, **kwargs):
-		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_CELL_CONTEXT_MENU, -1)
+		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_CELL_LEFT_CLICK, -1)
+		
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+		self.row = kwargs.pop("row", None)
+
+class CellRightClickEvent(wx.PyCommandEvent):
+	"""
+	A cell has been right-clicked.
+	Will not fire if *showContextMenu* is True.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_CELL_RIGHT_CLICK, -1)
 		self.SetEventObject(objectListView)
 		self.objectListView = objectListView
 		self.row = kwargs.pop("row", None)
@@ -121,13 +139,13 @@ class CellActivatedEvent(wx.PyCommandEvent):
 #----------------------------------------------------------------------------
 #Columns
 
-class ColumnHeaderClickEvent(wx.PyCommandEvent):
+class ColumnHeaderLeftClickEvent(wx.PyCommandEvent):
 	"""
 	A column header has been clicked.
 	"""
 
 	def __init__(self, objectListView, **kwargs):
-		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_COLUMN_HEADER_CLICK, -1)
+		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_COLUMN_HEADER_LEFT_CLICK, -1)
 		self.SetEventObject(objectListView)
 		self.objectListView = objectListView
 		self.column = kwargs.pop("column", None)
@@ -152,7 +170,6 @@ class ColumnHeaderRightClickEvent(wx.PyCommandEvent):
 #Groups
 
 class GroupCreationEvent(wx.PyCommandEvent):
-
 	"""
 	The user is about to create one or more groups.
 
@@ -294,6 +311,8 @@ class EditCellStartingEvent(VetoableEvent):
 	"""
 	A cell has started to be edited.
 
+	Veto() will not allow the edit to happen.
+
 	All attributes are public and should be considered read-only.
 	"""
 
@@ -359,3 +378,44 @@ class EditCellFinishedEvent(wx.PyCommandEvent):
 		self.row = kwargs.pop("row", None)
 		self.value = kwargs.pop("value", None)
 		self.editCanceled = kwargs.pop("editCanceled", None)
+
+#----------------------------------------------------------------------------
+#Context Menu
+
+class MenuCreationEvent(VetoableEvent):
+	"""
+	The context menu will begin building.
+
+	Veto() will not allow the menu to be built or shown.
+	If this happens, EVT_DATA_CELL_RIGHT_CLICK will fire.
+
+	The handler can mess with the menu before it is shown.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		VetoableEvent.__init__(self, olv_EVT_DATA_MENU_CREATING)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.index = kwargs.pop("index", None)
+		self.column = kwargs.pop("column", None)
+		self.row = kwargs.pop("row", None)
+		self.menu = kwargs.pop("menu", None)
+
+class MenuItemSelectedEvent(VetoableEvent):
+	"""
+	A menu item has been selected.
+
+	Veto() will not allow any functions that 
+	the menu item should run to be ran.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		VetoableEvent.__init__(self, olv_EVT_DATA_MENU_ITEM_SELECTED)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.index = kwargs.pop("index", None)
+		self.column = kwargs.pop("column", None)
+		self.row = kwargs.pop("row", None)
+		self.item = kwargs.pop("item", None)

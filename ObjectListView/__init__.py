@@ -28,17 +28,18 @@ from . ListCtrlPrinter import ListCtrlPrinter, ReportFormat, BlockFormat, LineDe
 from . import Filter
 
 from . DataObjectListView import DataObjectListView, DataColumnDefn, DataListGroup, DataListEmptyGroup
-from . DOLVEvent import EVT_DATA_SELECTION_CHANGED, EVT_DATA_CELL_CONTEXT_MENU, EVT_DATA_CELL_ACTIVATED, EVT_DATA_GROUP_SELECTED
-from . DOLVEvent import EVT_DATA_COLUMN_HEADER_CLICK, EVT_DATA_COLUMN_HEADER_RIGHT_CLICK, EVT_DATA_SORTING, EVT_DATA_SORTED, EVT_DATA_REORDER
+from . DOLVEvent import EVT_DATA_SELECTION_CHANGED, EVT_DATA_CELL_LEFT_CLICK, EVT_DATA_CELL_RIGHT_CLICK, EVT_DATA_CELL_ACTIVATED, EVT_DATA_GROUP_SELECTED
+from . DOLVEvent import EVT_DATA_COLUMN_HEADER_LEFT_CLICK, EVT_DATA_COLUMN_HEADER_RIGHT_CLICK, EVT_DATA_SORTING, EVT_DATA_SORTED, EVT_DATA_REORDER
 # from . DOLVEvent import EVT_DATA_DRAG_STARTING, EVT_DATA_DRAG_STARTED, EVT_DATA_DRAG_FINISHING, EVT_DATA_DRAG_FINISHED,
 # from . DOLVEvent import EVT_DATA_DROP_STARTING, EVT_DATA_DROP_STARTED, EVT_DATA_DROP_FINISHING, EVT_DATA_DROP_FINISHED, EVT_DATA_DROP_POSSIBLE
 from . DOLVEvent import EVT_DATA_CELL_EDIT_STARTING, EVT_DATA_CELL_EDIT_STARTED, EVT_DATA_CELL_EDIT_FINISHING, EVT_DATA_CELL_EDIT_FINISHED
-from . DOLVEvent import EVT_DATA_COLLAPSING, EVT_DATA_COLLAPSED, EVT_DATA_EXPANDING, EVT_DATA_EXPANDED, EVT_DATA_GROUP_CREATING
+from . DOLVEvent import EVT_DATA_COLLAPSING, EVT_DATA_COLLAPSED, EVT_DATA_EXPANDING, EVT_DATA_EXPANDED
+from . DOLVEvent import EVT_DATA_GROUP_CREATING, EVT_DATA_MENU_CREATING, EVT_DATA_MENU_ITEM_SELECTED
 
-from . DOLVEvent import SelectionChangedEvent, CellContextMenuEvent, CellActivatedEvent
-from . DOLVEvent import ColumnHeaderClickEvent, ColumnHeaderRightClickEvent, GroupCreationEvent, GroupSelectedEvent
+from . DOLVEvent import SelectionChangedEvent, CellRightClickEvent, CellActivatedEvent
+from . DOLVEvent import ColumnHeaderLeftClickEvent, ColumnHeaderRightClickEvent, GroupCreationEvent, GroupSelectedEvent
 from . DOLVEvent import CollapsingEvent, ExpandingEvent, CollapsedEvent, ExpandedEvent
-from . DOLVEvent import SortingEvent, SortedEvent, ReorderEvent
+from . DOLVEvent import SortingEvent, SortedEvent, ReorderEvent, MenuCreationEvent, MenuItemSelectedEvent
 from . DOLVEvent import EditCellStartingEvent, EditCellStartedEvent, EditCellFinishingEvent
 
 __all__ = [

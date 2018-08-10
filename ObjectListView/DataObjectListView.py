@@ -198,6 +198,12 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.searchPrefix = u""
 		self.whenLastTypingEvent = 0
 
+		#Context Menu
+		self.contextMenu = ContextMenu(self)
+
+		self.showContextMenu 	= kwargs.pop("showContextMenu", False)
+
+
 		#Groups
 		self.groups = []
 		self.emptyGroups = []
@@ -271,14 +277,18 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.Bind(wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self._RelaySelectionChanged)
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_CONTEXT_MENU, self._RelayCellContextMenu)
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_ACTIVATED, self._RelayCellActivated)
-		self.Bind(wx.dataview.EVT_DATAVIEW_COLUMN_HEADER_CLICK, self._RelayColumnHeaderClick)
+
+		self.Bind(wx.dataview.EVT_DATAVIEW_COLUMN_HEADER_CLICK, self._RelayColumnHeaderLeftClick)
 		self.Bind(wx.dataview.EVT_DATAVIEW_COLUMN_HEADER_RIGHT_CLICK, self._RelayColumnHeaderRightClick)
+
 		self.Bind(wx.dataview.EVT_DATAVIEW_COLUMN_SORTED, self._RelaySorted)
 		self.Bind(wx.dataview.EVT_DATAVIEW_COLUMN_REORDERED, self._RelayReorder)
+
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_COLLAPSING, self._RelayCollapsing)
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_COLLAPSED, self._RelayCollapsed)
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_EXPANDING, self._RelayExpanding)
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_EXPANDED, self._RelayExpanded)
+
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_START_EDITING, self._RelayEditCellStarting)
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_EDITING_STARTED, self._RelayEditCellStarted)
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_EDITING_DONE, self._RelayEditCellFinishing)
@@ -406,7 +416,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	def SetBackgroundColour(self, model, color = None):
 		"""
 		Changes the background color for the specified model only.
-		If *color* is None, the default color will be used.
+		If *color* is None, the default color will be used. If *color* is a list, 
+		the first element will be the color if the row if odd; 
+		the second element will be the color if the row is even.
 		"""
 
 		if (color != None):
@@ -1454,7 +1466,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		kwargs["value"] = relayEvent.GetValue()
 		kwargs["editCanceled"] = relayEvent.IsEditCancelled()
 
-		# print("@6", kwargs)
 		return kwargs
 
 	def TriggerEvent(self, eventFunction, **kwargs):
@@ -1493,18 +1504,32 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			if (isinstance(row, DataListGroup)):
 				self._RelayEvent(relayEvent, DOLVEvent.GroupSelectedEvent)
 			else:
+				self._RelayEvent(relayEvent, DOLVEvent.CellLeftClickEvent)
 				self._RelayEvent(relayEvent, DOLVEvent.SelectionChangedEvent)
 		else:
+			if (not isinstance(row, DataListGroup)):
+				self._RelayEvent(relayEvent, DOLVEvent.CellLeftClickEvent)
+
 			relayEvent.Skip()
 
 	def _RelayCellContextMenu(self, relayEvent):
-		self._RelayEvent(relayEvent, DOLVEvent.CellContextMenuEvent)
+		if (self.showContextMenu):
+			rowInfo = self._getRelayInfo(relayEvent)
+
+			#Check if the user clicked on empty space instead of on an item
+			if (rowInfo["column"] != None):
+				self.contextMenu.SetRow(rowInfo["row"])
+				self.contextMenu.SetColumn(rowInfo["column"])
+				if (self.contextMenu.Show()):
+					relayEvent.Skip()
+					return
+		self._RelayEvent(relayEvent, DOLVEvent.CellRightClickEvent)
 
 	def _RelayCellActivated(self, relayEvent):
 		self._RelayEvent(relayEvent, DOLVEvent.CellActivatedEvent)
 
-	def _RelayColumnHeaderClick(self, relayEvent):
-		self._RelayEvent(relayEvent, DOLVEvent.ColumnHeaderClickEvent)
+	def _RelayColumnHeaderLeftClick(self, relayEvent):
+		self._RelayEvent(relayEvent, DOLVEvent.ColumnHeaderLeftClickEvent)
 
 	def _RelayColumnHeaderRightClick(self, relayEvent):
 		self._RelayEvent(relayEvent, DOLVEvent.ColumnHeaderRightClickEvent)
@@ -1903,18 +1928,10 @@ class DataColumnDefn(object):
 		Set this columns aspect of the given modelObject to have the given value.
 		"""
 		_log("@DataColumnDefn.SetValue", modelObject, value)
-		if self.valueSetter is None:
-			return _SetValueUsingMunger(
-				modelObject,
-				value,
-				self.valueGetter,
-				False)
+		if (self.valueSetter is None):
+			return _SetValueUsingMunger(modelObject, value, self.valueGetter)
 		else:
-			return _SetValueUsingMunger(
-				modelObject,
-				value,
-				self.valueSetter,
-				True)
+			return _SetValueUsingMunger(modelObject, value, self.valueSetter)
 
 	#-------------------------------------------------------------------------
 	# Width management
@@ -1958,6 +1975,159 @@ class DataColumnDefn(object):
 
 		if (refreshColumn):
 			self.RefreshColumn()
+
+class ContextMenu(object):
+	"""
+	A wrapper for the context menu that appears when the user right-clicks on an item.
+	"""
+
+	def __init__(self, olv):
+		"""
+		Create a context menu with the given attributes.
+		"""
+
+		super().__init__()
+
+		self.olv = olv
+		self.contents = []    #[id]
+		self.idCatalogue = {} #{id: text}
+		self.exclusive_x = {} #{id: [row]}
+		self.exclusive_y = {} #{id: [column]}
+		self.conditions = {}  #{id: function}
+		self.functions = {}   #{id: function}
+		self.checks = {}      #{id: state}
+		self.radios = {}      #{id: state}
+
+	def SetRow(self, row):
+		"""
+		Determines what row the context menu applies to.
+		"""
+
+		self.row = row
+
+	def SetColumn(self, column):
+		"""
+		Determines what column the context menu applies to.
+		"""
+
+		if (not isinstance(column, DataColumnDefn)):
+			column = self.olv.columns[column]
+		self.column = column
+
+	def AddItem(self, text = None, function = None, row = None, column = None, condition = None, check = None, radio = None):
+		"""
+		Add an item to the context menu.
+
+		If *text* is not given, the menu item will be a separator.
+		If *check* is given, the menu item will have a check box with the state of *check*
+		If *check* is given, the menu item will have a radio button with the state of *check*
+
+		If *function* is given, that function will run when the item is clicked.
+		The function must accept the following args: row, column, item
+
+		If *condition* is given, it must be a function that will decide if the item should appear or not.
+		The function must accept the following args: row, column, text
+		If the function returns True, the item will be added
+
+		If *row* is given, this item will only show for that row; a list of rows can be given.
+		If *column* is given, this item will only show for that column; a list of columns can be given.
+		"""
+
+		item_id = wx.NewId()
+		self.contents.append(item_id)
+		self.idCatalogue[item_id] = text
+
+		#Setup Type
+		if (check != None):
+			self.checks[item_id] = check
+
+		if (radio != None):
+			self.radios[item_id] = radio
+
+		#Setup Conditional
+		if (row != None):
+			self.exclusive_x[item_id] = set()
+			for _row in row if (isinstance(row, (list, tuple, set, types.GeneratorType))) else [row]:
+				self.exclusive_x[item_id].add(_row)
+
+		if (column != None):
+			self.exclusive_y[item_id] = set()
+			for _column in column if (isinstance(column, (list, tuple, set, types.GeneratorType))) else [column]:
+				if (not isinstance(_column, DataColumnDefn)):
+					_column = self.olv.columns[_column]
+				self.exclusive_y[item_id].add(_column)
+		
+		if (condition != None):
+			self.conditions[item_id] = condition
+
+		#Bind Functions
+		self.olv.Bind(wx.EVT_MENU, self._handleItemClicked, id = item_id)
+
+		if (function != None):
+			self.functions[item_id] = function
+
+	def _handleItemClicked(self, event):
+		"""
+		Handles a clicked item.
+		"""
+
+		item_id = event.GetId()
+		menu = event.GetEventObject()
+		item = menu.FindItemById(item_id)
+
+		answer = self.olv.TriggerEvent(DOLVEvent.MenuItemSelectedEvent, row = self.row, item = item,
+			column = self.column, index = self.column.column.GetModelColumn(), menu = menu)
+
+		if ((answer != False) and (item_id in self.functions)):
+			self.functions[item_id](self.row, self.column, item)
+
+		event.Skip()
+
+	def Show(self):
+		"""
+		Show the menu.
+		"""
+
+		#Cannot show an empty list
+		if (not self.contents):
+			return
+
+		#Create the menu
+		menu = wx.Menu()
+		for item_id in self.contents:
+			text = _Munge(self.row, self.idCatalogue[item_id], extraArgs = [self.column], returnMunger_onFail = True)
+
+			if ((item_id in self.conditions) and (not self.conditions[item_id](self.row, self.column, text))):
+				continue
+			if (not self.exclusive_x.get(item_id, {None}).intersection({None, self.row})):
+				continue
+			if (not self.exclusive_y.get(item_id, {None}).intersection({None, self.column})):
+				continue
+ 
+			if (not text):
+				menu.Append(item_id, "", kind = wx.ITEM_SEPARATOR)
+
+			elif (item_id in self.checks):
+				menu.AppendCheckItem(item_id, text)
+				menu.Check(item_id, _Munge(self.row, self.checks[item_id], extraArgs = [self.column], returnMunger_onFail = True))
+
+			elif (item_id in self.radios):
+				menu.AppendRadioItem(item_id, text)
+				menu.Check(item_id, _Munge(self.row, self.radios[item_id], extraArgs = [self.column], returnMunger_onFail = True))
+			
+			else:
+				menu.Append(item_id, text)
+
+		#Allow the user to veto the menu and/or make changes to it
+		answer = self.olv.TriggerEvent(DOLVEvent.MenuCreationEvent, row = self.row, 
+			column = self.column, index = self.column.column.GetModelColumn(), menu = menu)
+		if (answer == False):
+			return False
+
+		#Show the menu
+		self.olv.PopupMenu(menu)
+		menu.Destroy()
+		return True
 
 #Utility Functions
 def _log(*data):
@@ -2016,51 +2186,51 @@ def _StringToValue(value, converter):
 	except UnicodeError:
 		return unicode(fmt) % value
 
-def _SetValueUsingMunger(modelObject, value, munger, shouldInvokeCallable):
+def _SetValueUsingMunger(modelObject, value, munger, extraArgs = []):
 	"""
-	Look for ways to update modelObject with value using munger. If munger finds a
-	callable, it will be called if shouldInvokeCallable == True.
+	Look for ways to update modelObject with value using munger.
 	"""
 	# If there isn't a munger, we can't do anything
 	if (munger is None):
 		return
 
 	# Is munger a function?
-	if (callable(munger)):
-		if (shouldInvokeCallable):
-			munger(modelObject, value)
-		return
-
-	# Try indexed access for dictionary or list like objects
+	if (extraArgs):
+		try:
+			munger(modelObject, value, *extraArgs)
+			return
+		except:
+			pass
 	try:
-		modelObject[munger] = value
+		munger(modelObject, value)
 		return
 	except:
 		pass
 
-	# Is munger the name of some slot in the modelObject?
+	# Is munger a dictionary key?
 	try:
-		attr = getattr(modelObject, munger)
-	except TypeError:
-		return
-	except AttributeError:
-		return
+		if (munger in modelObject):
+			modelObject[munger] = value
+			return
+	except:
+		pass
 
 	# Is munger the name of a method?
-	if (callable(attr)):
-		if (shouldInvokeCallable):
-			attr(value)
-		return
-
-	# If we get to here, it seems that munger is the name of an attribute or
-	# property on modelObject. Try to set, realising that many things could
-	# still go wrong.
 	try:
-		setattr(modelObject, munger, value)
+		attr = getattr(modelObject, munger)
+		attr(value)
+		return
 	except:
 		pass
 
-def _Munge(modelObject, munger, returnMunger_onFail = False):
+	# Is munger is the name of an attribute or property on modelObject?
+	try:
+		if (hasattr(modelObject, munger)):
+			setattr(modelObject, munger, value)
+	except:
+		pass
+
+def _Munge(modelObject, munger, extraArgs = [], returnMunger_onFail = False):
 	"""
 	Wrest some value from the given modelObject using the munger.
 	With a description like that, you know this method is going to be obscure :-)
@@ -2098,6 +2268,11 @@ def _Munge(modelObject, munger, returnMunger_onFail = False):
 	# Use the callable directly, if possible.
 	# In accordance with Guido's rules for Python 3, we just call it and catch the
 	# exception
+	if (extraArgs):
+		try:
+			return munger(modelObject, *extraArgs)
+		except TypeError:
+			pass
 	try:
 		return munger(modelObject)
 	except TypeError:
@@ -2107,10 +2282,12 @@ def _Munge(modelObject, munger, returnMunger_onFail = False):
 	try:
 		return modelObject[munger]
 	except:
-		if (returnMunger_onFail):
-			return munger
-		else:
-			return None
+		pass
+
+	if (returnMunger_onFail):
+		return munger
+	else:
+		return None
 
 def _window_to_bitmap(window):
 	"""
@@ -2317,7 +2494,13 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		node = self.ItemToObject(item)
 		if (node in self.olv.colorOverride):
-			attribute.SetBackgroundColour(self.olv.colorOverride[node])
+			try:
+				attribute.SetBackgroundColour(self.olv.colorOverride[node])
+			except TypeError:
+				if ((node not in self.colorCatalogue) or (self.colorCatalogue[node] is self.olv.oddRowsBackColor)):
+					attribute.SetBackgroundColour(self.olv.colorOverride[node][0])
+				else:
+					attribute.SetBackgroundColour(self.olv.colorOverride[node][1])
 		else:
 			if (self.sortCounter != None):
 				if (node not in self.sort_colorCatalogue):
@@ -2348,10 +2531,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		def applyRowColor(rows):
 			if (self.olv.useAlternateBackColors and self.olv.InReportView()):
 				for index, row in enumerate(rows):
-					#Determine row color outside of virtual function for speed
-					if (index in self.olv.colorOverride):
-						self.colorCatalogue[row] = self.olv.colorOverride[index]
-					elif (index % 2):
+					if (index % 2):
 						self.colorCatalogue[row] = self.olv.evenRowsBackColor
 					else:
 						self.colorCatalogue[row] = self.olv.oddRowsBackColor
@@ -2359,10 +2539,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		def applyGroupColor(group, rows):
 			if (self.olv.useAlternateBackColors and self.olv.InReportView()):
 				if (self.olv.groupBackColor != None):
-					if (index in self.olv.colorOverride):
-						self.colorCatalogue[group] = self.olv.colorOverride[index]
-					else:
-						self.colorCatalogue[group] = self.olv.groupBackColor
+					self.colorCatalogue[group] = self.olv.groupBackColor
 				applyRowColor(rows)
 
 		def applyRowFilter(rows):
@@ -2505,10 +2682,11 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		except AttributeError:
 			raise AttributeError(f"There is no column {column}")
 
+		print("@model.SetValue", value, node.__repr__(), column, defn.valueSetter, defn.valueGetter)
 		if (defn.valueSetter is None):
-			_SetValueUsingMunger(node, value, defn.valueGetter, False)
+			_SetValueUsingMunger(node, value, defn.valueGetter, extraArgs = [defn])
 		else:
-			_SetValueUsingMunger(node, value, defn.valueSetter, True)
+			_SetValueUsingMunger(node, value, defn.valueSetter, extraArgs = [defn])
 			
 		return True
 
