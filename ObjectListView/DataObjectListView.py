@@ -96,22 +96,15 @@ __author__ = "Phillip Piper"
 __date__ = "18 June 2008"
 
 import os
-import wx
 import ast
 import types
-import wx.dataview
 import datetime
-import itertools
-import locale
-import operator
-import string
-import time
-import six
-import unicodedata
+
+import wx
+import wx.dataview
+import wx.lib.wordwrap
 
 from . import DOLVEvent
-
-
 
 #----------------------------------------------------------------------------
 # A DataView version of ObjectListView
@@ -154,7 +147,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		"""
 		_log("@DataObjectListView.__init__")
-		
 
 		#Standard
 		self.columns = {}
@@ -210,6 +202,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		self.groupTitle 				= kwargs.pop("groupTitle", "")
 		self.showGroups 				= kwargs.pop("showGroups", False)
+		self.showEmptyGroups 			= kwargs.pop("showEmptyGroups", False)
 		self.showItemCounts 			= kwargs.pop("showItemCounts", True)
 		self.separateGroupColumn 		= kwargs.pop("separateGroupColumn", False)
 		self.alwaysGroupByColumnIndex	= kwargs.pop("alwaysGroupByColumnIndex", -1)
@@ -222,8 +215,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		#Etc
 		self.handleStandardKeys = True
-		self.emptyListMsg 	= kwargs.pop("emptyListMsg", "This list is empty")
-		self.emptyListFont 	= kwargs.pop("emptyListFont", wx.Font(24, wx.DEFAULT, wx.NORMAL, wx.NORMAL, 0, ""))
+		self.emptyListMsg 		= kwargs.pop("emptyListMsg", "This list is empty")
+		self.emptyListFilterMsg = kwargs.pop("emptyListFilterMsg", None)
+		self.emptyListFont 		= kwargs.pop("emptyListFont", wx.Font(24, wx.DEFAULT, wx.NORMAL, wx.NORMAL, 0, ""))
 
 		#Setup Style
 		style = kwargs.pop("style", None) #Do NOT pass in wx.LC_REPORT, or it will call virtual functions A LOT
@@ -403,13 +397,20 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 	def SetEmptyListMsg(self, msg):
 		"""
-		When there are no objects in the list, show this message in the control
+		When there are no objects in the list, show this message in the control.
 		"""
 		self.emptyListMsg = msg
 
+	def SetEmptyListFilterMsg(self, msg):
+		"""
+		When there are no objects in the list because of *filter*, show this message in the control.
+		If None, will show the message in *emptyListMsg*.
+		"""
+		self.emptyListFilterMsg = msg
+
 	def SetEmptyListMsgFont(self, font):
 		"""
-		In what font should the empty list msg be rendered?
+		In what font should the empty list message be rendered?
 		"""
 		self.emptyListFont = font
 
@@ -732,6 +733,25 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			return
 
 		self.showGroups = showGroups
+		if (not len(self.columns)):
+			return
+
+		self.model.Cleared()
+
+	def GetShowEmptyGroups(self):
+		"""
+		Return whether or not this control is showing empty groups
+		"""
+		return self.showEmptyGroups
+
+	def SetShowEmptyGroups(self, showEmptyGroups = True):
+		"""
+		Set whether or not this control is showing empty groups
+		"""
+		if (showEmptyGroups == self.showEmptyGroups):
+			return
+
+		self.showEmptyGroups = showEmptyGroups
 		if (not len(self.columns)):
 			return
 
@@ -1363,21 +1383,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 	# 	return (rowIndex, 0, -1)
 
-
-	# ----------------------------------------------------------------------
-	# Utilities
-
-	# def _IsPrintable(self, char):
-	# 	"""
-	# 	Check if char is printable using unicodedata as string.isPrintable
-	# 	is only available in Py3.
-	# 	"""
-	# 	cat = unicodedata.category(char)
-	# 	if cat[0] == "L":
-	# 		return True
-	# 	else:
-	# 		return False
-
 	# #-------------------------------------------------------------------------
 	# # Event handling
 
@@ -1420,9 +1425,10 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Draws all overlays on top of the DataList.
 		"""
 
-		def drawEmptyList(item):
+		def drawEmptyList(item, message):
 			"""
-			Draws the empty list message."""
+			Draws the empty list message.
+			"""
 
 			self.overlayEmptyListMsg.Reset()
 			
@@ -1434,12 +1440,14 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				dc = wx.GCDC(dc) #Mac's DC is already the same as a GCDC
 
 			size = item.GetClientSize()
-			_drawText(dc, text = self.emptyListMsg, rectangle = wx.Rect(0, 0, size[0], size[1]), align = "center", color = wx.LIGHT_GREY, font = self.emptyListFont)
+			_drawText(dc, text = message, rectangle = wx.Rect(0, 0, size[0], size[1]), x_align = "center", color = wx.LIGHT_GREY, font = self.emptyListFont, wrap = True)
 
 			del odc  # Make sure the odc is destroyed before the dc is.
 
 		if (not self.modelObjects):
-			wx.CallAfter(drawEmptyList, event.GetEventObject())
+			wx.CallAfter(drawEmptyList, event.GetEventObject(), self.emptyListMsg)
+		elif (not self.model.rootLength):
+			wx.CallAfter(drawEmptyList, event.GetEventObject(), self.emptyListFilterMsg or self.emptyListMsg)
 		event.Skip()
 
 	#Event Relays
@@ -2301,16 +2309,21 @@ def _window_to_bitmap(window):
 	mdc.Blit(0, 0, width, height, wdc, 0, 0)
 	return bitmap
 
-def _drawText(dc, rectangle = wx.Rect(0, 0, 100, 100), text = "", isSelected = False, isEnabled = True, x_offset = 0, y_offset = 0, align = None, color = None, font = None):
+def _drawText(dc, rectangle = wx.Rect(0, 0, 100, 100), text = "", isSelected = False, isEnabled = True, 
+	x_offset = 0, y_offset = 0, x_align = None, y_align = None, color = None, font = None, wrap = False):
 	"""Draw a simple text label in appropriate colors.
 	Special thanks to Milan Skala for how to center text on http://wxpython-users.1045709.n5.nabble.com/Draw-text-over-an-existing-bitmap-td5725527.html
 
-	align (str) - Where the text should be aligned in the cell
+	x_align (str) - Where the text should be aligned in the cell
 		~ "left", "right", "center"
 		- If None: No alignment will be done
 
+	y_align (str) - Where the button should be aligned with respect to the x-axis in the cell
+		~ "top", "bottom", "center"
+		- If None: Will use "center"
+
 	Example Input: _drawText(dc, rectangle, text, isSelected)
-	Example Input: _drawText(dc, rectangle, text, isSelected, align = "left", color = textColor)
+	Example Input: _drawText(dc, rectangle, text, isSelected, x_align = "left", color = textColor)
 	"""
 
 	oldColor = dc.GetTextForeground()
@@ -2331,21 +2344,20 @@ def _drawText(dc, rectangle = wx.Rect(0, 0, 100, 100), text = "", isSelected = F
 		if (font != None):
 			dc.SetFont(font)
 
-		if (align == None):
-			x_align = 0
-			y_align = 0
-		else:
-			width, height = dc.GetTextExtent(text)
-			y_align = (rectangle.height - height) / 2
-		
-			if (align.lower()[0] == "l"):
-				x_align = 0
-			elif (align.lower()[0] == "r"):
-				x_align = rectangle.width - width
-			else:
-				x_align = (rectangle.width - width) / 2
+		if (wrap):
+			text = wx.lib.wordwrap.wordwrap(text, rectangle.width, dc)
 
-		dc.DrawText(text, rectangle.x + x_offset + x_align, rectangle.y + y_offset + y_align)
+		if (x_align == None):
+			x_align = 0
+		else:
+			x_align = {"l": wx.ALIGN_LEFT, "r": wx.ALIGN_RIGHT, "c": wx.ALIGN_CENTER_HORIZONTAL}[x_align[0].lower()]
+
+		if (y_align == None):
+			y_align = wx.ALIGN_CENTER_VERTICAL
+		else:
+			y_align = {"t": wx.ALIGN_TOP, "b": wx.ALIGN_BOTTOM, "c": wx.ALIGN_CENTER_VERTICAL}[y_align[0].lower()]
+
+		dc.DrawLabel(text, (rectangle[0] + x_offset, rectangle[1] + y_offset, rectangle[2], rectangle[3]), alignment = x_align|y_align)
 	finally:
 		dc.SetFont(oldFont)
 		dc.SetTextForeground(oldColor)
@@ -2474,6 +2486,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		self.olv = olv
 		self.colorCatalogue = {}
 
+		self.rootLength = 0 #How many children are shown on the top level of the model
 		self.sortCounter = None
 		self.sort_colorCatalogue = {}
 
@@ -2559,21 +2572,22 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# end up being the collection of visible roots in our tree.
 		if (not parent):
 			if (self.olv.showGroups):
-				shownGroups = 0
+				self.rootLength = 0
 				for group in self.olv.groups:
 					rowList = applyRowFilter(group.modelObjects)
-					if ((not rowList) and (group.key not in self.olv.emptyGroups)):
+					if ((not rowList) and ((not _Munge(group, self.olv.showEmptyGroups, returnMunger_onFail = True)) or (group.key not in self.olv.emptyGroups))):
 						continue
-					shownGroups += 1
+
+					self.rootLength += 1
 					applyGroupColor(group, rowList)
 					children.append(self.ObjectToItem(group))
-				return shownGroups
 			else:
 				rowList = applyRowFilter(self.olv.modelObjects)
+				self.rootLength = len(rowList)
 				applyRowColor(rowList)
 				for row in rowList:
 					children.append(self.ObjectToItem(row))
-				return len(rowList)
+			return self.rootLength
 
 		# Otherwise we'll fetch the python object associated with the parent
 		# item and make DV items for each of it's child objects.
@@ -3131,8 +3145,8 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 			rectangle.Deflate(2, 0)
 
 		if (self._text):
-			_drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, align = "left")
-			# _drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, align = "center" if (useNativeRenderer != None) else "left")
+			_drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, x_align = "left")
+			# _drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, x_align = "center" if (useNativeRenderer != None) else "left")
 		return True
 
 	def LeftClick(self, clickPos, cellRect, model, item, columnIndex):
@@ -3207,7 +3221,7 @@ class Renderer_File(wx.dataview.DataViewCustomRenderer):
 		else:
 			value = self.value
 
-		_drawText(dc, rectangle, value, isSelected, align = "left")
+		_drawText(dc, rectangle, value, isSelected, x_align = "left")
 		return True
 
 	def HasEditorCtrl(self):
