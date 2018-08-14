@@ -154,12 +154,12 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.colorOverride = {}
 		self.lastSelected = None
 
-		useWeakRefs 				= kwargs.pop("useWeakRefs", False)
-		self.noHeader 				= kwargs.pop("noHeader", False)
-		self.rowFormatter 			= kwargs.pop("rowFormatter", None)
-		self.singleSelect 			= kwargs.pop("singleSelect", True)
-		self.verticalLines 			= kwargs.pop("verticalLines", False)
-		self.horizontalLines 		= kwargs.pop("horizontalLines", False)
+		useWeakRefs 			= kwargs.pop("useWeakRefs", False)
+		self.noHeader 			= kwargs.pop("noHeader", False)
+		self.rowFormatter 		= kwargs.pop("rowFormatter", None)
+		self.singleSelect 		= kwargs.pop("singleSelect", True)
+		self.verticalLines 		= kwargs.pop("verticalLines", False)
+		self.horizontalLines 	= kwargs.pop("horizontalLines", False)
 		
 		self.groupBackColor			= kwargs.pop("groupBackColor", None)# wx.Colour(195, 144, 212))  # LIGHT MAGENTA
 		self.oddRowsBackColor		= kwargs.pop("oddRowsBackColor", wx.Colour(255, 250, 205))  # LEMON CHIFFON
@@ -195,23 +195,24 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		self.showContextMenu 	= kwargs.pop("showContextMenu", False)
 
-
 		#Groups
 		self.groups = []
 		self.emptyGroups = []
 
+		groupIndent 					= kwargs.pop("groupIndent", False)
 		self.groupTitle 				= kwargs.pop("groupTitle", "")
 		self.showGroups 				= kwargs.pop("showGroups", False)
-		self.showEmptyGroups 			= kwargs.pop("showEmptyGroups", False)
 		self.showItemCounts 			= kwargs.pop("showItemCounts", True)
+		self.hideFirstIndent 			= kwargs.pop("hideFirstIndent", False)
+		self.showEmptyGroups 			= kwargs.pop("showEmptyGroups", False)
 		self.separateGroupColumn 		= kwargs.pop("separateGroupColumn", False)
 		self.alwaysGroupByColumnIndex	= kwargs.pop("alwaysGroupByColumnIndex", -1)
 		self.putBlankLineBetweenGroups	= kwargs.pop("putBlankLineBetweenGroups", True)
 		self.rebuildGroup_onColumnClick = kwargs.pop("rebuildGroup_onColumnClick", True)
 
-		self.groupFont 					= kwargs.pop("groupFont", None) #(Bold, Italic, Color)
-		self.groupTextColour 			= kwargs.pop("groupTextColour", wx.Colour(33, 33, 33, 255))
-		self.groupBackgroundColour 		= kwargs.pop("groupBackgroundColour", wx.Colour(159, 185, 250, 249))
+		self.groupFont 				= kwargs.pop("groupFont", None) #(Bold, Italic, Color)
+		self.groupTextColour 		= kwargs.pop("groupTextColour", wx.Colour(33, 33, 33, 255))
+		self.groupBackgroundColour 	= kwargs.pop("groupBackgroundColour", wx.Colour(159, 185, 250, 249))
 
 		#Etc
 		self.handleStandardKeys = True
@@ -255,6 +256,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if (isinstance(self.groupFont, wx.Font)):
 			self.groupFont = (self.groupFont.GetWeight() == wx.BOLD, self.groupFont.GetStyle() == wx.ITALIC, wx.Colour(0, 0, 0))
 
+		self.SetGroupIndent(groupIndent)
 		self.SetModel(useWeakRefs = useWeakRefs)
 		self.overlayEmptyListMsg = wx.Overlay()
 
@@ -335,14 +337,19 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.ClearAll()
 		self.ClearColumns()
 
-		# TO DO: Change this to account for column re-ordering by user
 		self.columns = {}
+		
+		if (self.hideFirstIndent and (not self.showGroups)):
+			x = self.AddColumnDefn(DataColumnDefn(title = "", width = 0))
+			x.isInternal = True
+
 		for x in columns:
+			if (x.isInternal):
+				continue
 			if (isinstance(x, DataColumnDefn)):
 				self.AddColumnDefn(x)
 			else:
 				self.AddColumnDefn(DataColumnDefn(*x))
-
 		self.UpdateGroupColumn()
 
 		#Try to preserve the sort column
@@ -350,6 +357,13 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if (repopulate):
 			self.RepopulateList()
 		self.AutoSizeColumns()
+
+	def SetGroupIndent(self, indent = None):
+		"""
+		Sets the indentation of items in groups.
+		"""
+
+		super().SetIndent(indent or 0)
 
 	def AddColumnDefn(self, defn, index = None):
 		"""
@@ -359,13 +373,14 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		to populate the new column with data.
 		"""
 		_log("@DataObjectListView.AddColumnDefn", defn)
-		self.columns[len(self.columns)] = defn
+		self.columns[index or len(self.columns)] = defn
 
 		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewColumn.html
 		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewColumnFlags.enumeration.html
 		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewCtrl.html#wx.dataview.DataViewCtrl.AppendColumn
-		defn.SetEditable()
-		defn.column = wx.dataview.DataViewColumn(defn.title, defn.renderer, index or len(self.columns) - 1, width = defn.width, align = defn.GetAlignment())
+		defn.SetEditable(refreshColumn = False)
+		defn.column = wx.dataview.DataViewColumn(defn.title, defn.renderer, index or len(self.columns) - 1, 
+			width = defn.width, align = defn.GetAlignment(), flags = wx.COL_WIDTH_AUTOSIZE)
 		defn.SetHidden()
 		defn.SetSortable()
 		defn.SetResizeable()
@@ -373,9 +388,17 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		defn.SetSpaceFilling()
 
 		if (index):
-			self.InsertColumn(index, defn.column)
+			return self.InsertColumn(index, defn)
 		else:
-			self.AppendColumn(defn.column)
+			return self.AppendColumn(defn)
+
+	def InsertColumn(self, index, column):
+		super().InsertColumn(index, column.column)
+		return column
+
+	def AppendColumn(self, column):
+		super().AppendColumn(column.column)
+		return column
 
 	def SetObjects(self, modelObjects, preserveSelection = False, preserveExpansion = True):
 		"""
@@ -454,6 +477,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 	def GetItemCount(self):
 		return len(self.modelObjects)
+
+	def GetGroupIndent(self):
+		return super().GetIndent()
 
 	def GetObjects(self):
 		"""
@@ -701,7 +727,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			self.DeleteColumn(defn.column)
 
 		defn.column = wx.dataview.DataViewColumn(defn.title, defn.renderer, 0, width = defn.width, align = defn.GetAlignment())
-		self.InsertColumn(0, defn.column)
+		self.InsertColumn(0, defn)
 
 	def SetGroups(self, groups):
 		"""
@@ -736,6 +762,11 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if (not len(self.columns)):
 			return
 
+		#Because this groups need the extra indention for the expanders, 
+		#the extra indentation is needed if there are groups
+		if (self.hideFirstIndent):
+			self.SetColumns(list(self.columns.values()))
+
 		self.model.Cleared()
 
 	def GetShowEmptyGroups(self):
@@ -761,6 +792,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Return the column by which the rows should be grouped
 		"""
+		print("@1", self.alwaysGroupByColumnIndex, self.GetSortColumn(*args, **kwargs))
 		if (self.alwaysGroupByColumnIndex >= 0):
 			return self.GetAlwaysGroupByColumn(*args, **kwargs)
 
@@ -775,7 +807,11 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Get the column by which the rows should be always be grouped.
 		"""
 		if (self.alwaysGroupByColumnIndex == -1):
-			index = max([i for i in self.columns.keys() if (i is not None)])
+			try:
+				index = max([i for i in self.columns.keys() if (i is not None)])
+			except ValueError:
+				return None
+
 			if (returnIndex):
 				return index
 			return self.columns[index]
@@ -787,7 +823,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		except KeyError:
 			return None
 
-	def SetAlwaysGroupByColumn(self, column):
+	def SetAlwaysGroupByColumn(self, column, rebuild = True):
 		"""
 		Set the column by which the rows should be always be grouped.
 
@@ -799,10 +835,17 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		elif (isinstance(column, DataColumnDefn)):
 			try:
 				self.alwaysGroupByColumnIndex = [key for key, value in self.columns.items() if (value is column)][0]
-			except IndexError:
+			except IndexError as error:
+				print(error)
 				self.alwaysGroupByColumnIndex = -1
 		else:
 			self.alwaysGroupByColumnIndex = column
+
+		while (self.columns[self.alwaysGroupByColumnIndex].isInternal):
+			self.alwaysGroupByColumnIndex += 1
+
+		if (rebuild):
+			self.RebuildGroups()
 
 	def ToggleExpansion(self, group):
 		"""
@@ -1088,6 +1131,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				expanded[group.key] = group.IsExpanded()
 
 		groupingColumn = self.GetGroupByColumn()
+		assert (not groupingColumn.isInternal)
 
 		groupMap = {}
 		for model in modelObjects:
@@ -1116,7 +1160,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 					# else:
 					# 	super().Collapse(self.model.ObjectToItem(group))
 
-		groups = groupMap.values()
+		groups = list(groupMap.values())
 
 		if (self.GetShowItemCounts()):
 			self._BuildGroupTitles(groups, groupingColumn)
@@ -1222,7 +1266,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	def UpdateUnsorted(self, preserveExpansion = True):
 		if (self.unsortedFunction):
 			self.modelObjects = self.unsortedFunction(self.modelObjects)
-			self.RebuildGroups(preserveExpansion = preserveExpansion)
+		self.RebuildGroups(preserveExpansion = preserveExpansion)
 
 	def SetUnsortedFunction(self, function, repopulate = True):
 		"""
@@ -1740,7 +1784,7 @@ class DataColumnDefn(object):
 			self.SetRenderer(self.renderer.type, refreshColumn = False) #Renderer gets destroyed, so remake it
 
 			self.column = wx.dataview.DataViewColumn(self.title, self.renderer, index, width = self.width, align = self.GetAlignment())
-			olv.InsertColumn(index, self.column)
+			olv.InsertColumn(index, self)
 
 	def GetWidth(self):
 		"""
@@ -1793,7 +1837,7 @@ class DataColumnDefn(object):
 	def GetSortable(self):
 		return self.column.IsSortable()
 
-	def SetEditable(self, state = None):
+	def SetEditable(self, state = None, refreshColumn = True):
 		if (state is not None):
 			self.isEditable = state
 
@@ -1802,7 +1846,7 @@ class DataColumnDefn(object):
 		else:
 			key = "nonEdit"
 
-		self.SetRenderer(self.renderer.Clone(mode = rendererCatalogue[self.renderer.type][key]))
+		self.SetRenderer(self.renderer.Clone(mode = rendererCatalogue[self.renderer.type][key]), refreshColumn = refreshColumn)
 
 	def GetEditable(self):
 		return self.renderer.Mode == rendererCatalogue[self.renderer.type]["edit"]
@@ -1869,14 +1913,9 @@ class DataColumnDefn(object):
 		except TypeError:
 			pass
 
-		if converter and isinstance(
-			value,
-			(datetime.datetime,
-			 datetime.date,
-			 datetime.time)):
+		if (converter and isinstance(value, (datetime.datetime, datetime.date, datetime.time))):
 			return value.strftime(self.stringConverter)
-
-		if converter and isinstance(value, wx.DateTime):
+		if (converter and isinstance(value, wx.DateTime)):
 			return value.Format(self.stringConverter)
 
 		# By default, None is changed to an empty string.
@@ -1893,11 +1932,11 @@ class DataColumnDefn(object):
 		"""
 		Return the group key for this column from the given modelObject
 		"""
-		if self.groupKeyGetter is None:
+		if (self.groupKeyGetter is None):
 			key = self.GetValue(modelObject)
 		else:
 			key = _Munge(modelObject, self.groupKeyGetter)
-		if self.useInitialLetterForGroupKey:
+		if (self.useInitialLetterForGroupKey):
 			try:
 				return key[:1].upper()
 			except TypeError:
@@ -1910,9 +1949,8 @@ class DataColumnDefn(object):
 		Return the given group key as a human readable string
 		"""
 		# If there is no group key getter, we must have the normal aspect value. So if
-		# there isn't a special key converter, use the normal aspect to string
-		# converter.
-		if self.groupKeyGetter is None and self.groupKeyConverter is None:
+		# there isn't a special key converter, use the normal aspect to string converter.
+		if (self.groupKeyGetter is None and self.groupKeyConverter is None):
 			return self._StringToValue(groupKey, self.stringConverter)
 		else:
 			return self._StringToValue(groupKey, self.groupKeyConverter)
@@ -2274,8 +2312,7 @@ def _Munge(modelObject, munger, extraArgs = [], returnMunger_onFail = False):
 		pass
 
 	# Use the callable directly, if possible.
-	# In accordance with Guido's rules for Python 3, we just call it and catch the
-	# exception
+	# In accordance with Guido's rules for Python 3, we just call it and catch the exception
 	if (extraArgs):
 		try:
 			return munger(modelObject, *extraArgs)
@@ -2514,7 +2551,8 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 					attribute.SetBackgroundColour(self.olv.colorOverride[node][0])
 				else:
 					attribute.SetBackgroundColour(self.olv.colorOverride[node][1])
-		else:
+		
+		elif (not isinstance(node, DataListGroup)):
 			if (self.sortCounter != None):
 				if (node not in self.sort_colorCatalogue):
 					if (self.sortCounter % 2):
@@ -2525,8 +2563,8 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				attribute.SetBackgroundColour(self.sort_colorCatalogue[node])
 			elif (node in self.colorCatalogue):
 				attribute.SetBackgroundColour(self.colorCatalogue[node])
-
-		if (isinstance(node, DataListGroup)):
+		
+		else:
 			attribute.SetBold(self.olv.groupFont[0])
 			attribute.SetItalic(self.olv.groupFont[1])
 			attribute.SetColour(self.olv.groupFont[2])
@@ -2587,6 +2625,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				applyRowColor(rowList)
 				for row in rowList:
 					children.append(self.ObjectToItem(row))
+
 			return self.rootLength
 
 		# Otherwise we'll fetch the python object associated with the parent
@@ -2647,9 +2686,9 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			return node.title
 
 		if (alternateGetter):
-			value = _Munge(node, alternateGetter)
+			value = _Munge(node, alternateGetter, extraArgs = [defn])
 		else:
-			value = _Munge(node, defn.valueGetter)
+			value = _Munge(node, defn.valueGetter, extraArgs = [defn])
 
 		# print("@model.GetValue", defn.renderer, node.__repr__(), defn.valueGetter, value, defn.stringConverter)
 
@@ -2665,10 +2704,13 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				return 0
 		
 		elif (isinstance(defn.renderer, (wx.dataview.DataViewIconTextRenderer, Renderer_Icon))):
-			return wx.dataview.DataViewIconText(text = value[0], icon = value[1])
+			icon = _Munge(node, defn.renderer.icon, extraArgs = [defn])
+			if (icon == None):
+				return wx.dataview.DataViewIconText(text = value[0], icon = value[1])
+			return wx.dataview.DataViewIconText(text = value, icon = icon)
 		
 		elif (isinstance(defn.renderer, Renderer_MultiImage)):
-			image = _Munge(node, defn.renderer.image)
+			image = _Munge(node, defn.renderer.image, extraArgs = [defn])
 			if (isinstance(image, (list, tuple, set, types.GeneratorType))):
 				return image
 			else:
@@ -2696,7 +2738,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		except AttributeError:
 			raise AttributeError(f"There is no column {column}")
 
-		print("@model.SetValue", value, node.__repr__(), column, defn.valueSetter, defn.valueGetter)
+		# print("@model.SetValue", value, node.__repr__(), column, defn.valueSetter, defn.valueGetter)
 		if (defn.valueSetter is None):
 			_SetValueUsingMunger(node, value, defn.valueGetter, extraArgs = [defn])
 		else:
@@ -3033,7 +3075,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 	If it is None, Only text will be drawn.
 	"""
 
-	def __init__(self, text = None, function = None, enabled = None, useNativeRenderer = False, mode = wx.dataview.DATAVIEW_CELL_ACTIVATABLE, **kwargs):
+	def __init__(self, text = None, function = None, enabled = None, useNativeRenderer = False, ellipsize = True, mode = wx.dataview.DATAVIEW_CELL_ACTIVATABLE, **kwargs):
 		# _log("@Renderer_Button.__init__", text, function, useNativeRenderer, mode, kwargs)
 		wx.dataview.DataViewCustomRenderer.__init__(self, mode = mode, **kwargs)
 		self.type = "button"
@@ -3055,10 +3097,19 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self.function = function
 		self.useNativeRenderer = useNativeRenderer
 
+		self.SetEllipsize(ellipsize)
+
 	def Clone(self, **kwargs):
 		#Any keywords in kwargs will override keywords in buildingKwargs
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
+
+	def SetEllipsize(self, ellipsize = None):
+		self.ellipsize = ellipsize
+		self.buildingKwargs["ellipsize"] = ellipsize
+
+		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_MIDDLE,
+			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def SetValue_both(self, value):
 		# _log("@Renderer_Button.SetValue_both", value)
@@ -3169,7 +3220,7 @@ class Renderer_File(wx.dataview.DataViewCustomRenderer):
 
 	def __init__(self, *args, message = "", directoryOnly = False, openFile = True,
 		wildcard = "All files (*.*)|*.*", changeDir = False, single = False, preview = False,
-		mustExist = False, confirm = True, **kwargs):
+		mustExist = False, confirm = True, ellipsize = True, **kwargs):
 		_log("@Renderer_File.__init__", kwargs)
 
 		wx.dataview.DataViewCustomRenderer.__init__(self, **kwargs)
@@ -3197,11 +3248,19 @@ class Renderer_File(wx.dataview.DataViewCustomRenderer):
 				self.CreateEditorCtrl = self.CreateEditorCtrl_save
 
 		self.value = None
+		self.SetEllipsize(ellipsize)
 
 	def Clone(self, **kwargs):
 		#Any keywords in kwargs will override keywords in buildingKwargs
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
+
+	def SetEllipsize(self, ellipsize = None):
+		self.ellipsize = ellipsize
+		self.buildingKwargs["ellipsize"] = ellipsize
+
+		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_MIDDLE,
+			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def SetValue(self, value):
 		self.value = value
@@ -3549,14 +3608,20 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 			wx.dataview.DataViewChoiceRenderer.__init__(self, choices, **kwargs)
 		self.type = "choice"
 		self.buildingKwargs = {**kwargs, "choices": choices, "ellipsize": ellipsize}
-
-		if (not ellipsize):
-			self.DisableEllipsize()
+		
+		self.SetEllipsize(ellipsize)
 
 	def Clone(self, **kwargs):
 		#Any keywords in kwargs will override keywords in buildingKwargs
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
+
+	def SetEllipsize(self, ellipsize = None):
+		self.ellipsize = ellipsize
+		self.buildingKwargs["ellipsize"] = ellipsize
+
+		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_MIDDLE,
+			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def CreateEditorCtrl(self, parent, labelRect, value):
 		# _log("@Renderer_Choice.CreateEditorCtrl", parent, labelRect, value, self.choices)
@@ -3577,13 +3642,14 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 	"""
 	"""
 
-	def __init__(self, editor = None, password = False, **kwargs):
+	def __init__(self, editor = None, password = False, ellipsize = True, **kwargs):
 		_log("@Renderer_Text.__init__", kwargs)
 
 		wx.dataview.DataViewTextRenderer.__init__(self, **kwargs)
 		self.type = "text"
 		self.buildingKwargs = {**kwargs, "password": password}
 
+		self.SetEllipsize(ellipsize)
 		self.SetEditor(editor)
 		self.password = password
 
@@ -3591,6 +3657,13 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		#Any keywords in kwargs will override keywords in buildingKwargs
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
+
+	def SetEllipsize(self, ellipsize = None):
+		self.ellipsize = ellipsize
+		self.buildingKwargs["ellipsize"] = ellipsize
+
+		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_END,
+			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def SetEditor(self, editor = None):
 		self.editor = editor
@@ -3621,13 +3694,14 @@ class Renderer_Spin(wx.dataview.DataViewSpinRenderer):
 	"""
 	"""
 
-	def __init__(self, minimum = 0, maximum = 100, base = 10, editor = None, **kwargs):
+	def __init__(self, minimum = None, maximum = None, base = 10, editor = None, ellipsize = True, **kwargs):
 		_log("@Renderer_Spin.__init__", kwargs)
 
-		wx.dataview.DataViewSpinRenderer.__init__(self, minimum, maximum, **kwargs)
+		wx.dataview.DataViewSpinRenderer.__init__(self, 0, 1, **kwargs)
 		self.type = "spin"
 		self.buildingKwargs = {**kwargs}
 
+		self.SetEllipsize(ellipsize)
 		self.SetEditor(editor)
 		self.SetMax(minimum)
 		self.SetMin(maximum)
@@ -3638,16 +3712,23 @@ class Renderer_Spin(wx.dataview.DataViewSpinRenderer):
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
 
+	def SetEllipsize(self, ellipsize = None):
+		self.ellipsize = ellipsize
+		self.buildingKwargs["ellipsize"] = ellipsize
+
+		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_MIDDLE,
+			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
+
 	def SetEditor(self, editor = None):
 		self.editor = editor
 		self.buildingKwargs["editor"] = editor
 
 	def SetMax(self, maximum = None):
-		self.maximum = maximum or 100
+		self.maximum = maximum
 		self.buildingKwargs["maximum"] = maximum
 
 	def SetMin(self, minimum = None):
-		self.minimum = minimum or 0
+		self.minimum = minimum
 		self.buildingKwargs["minimum"] = minimum
 
 	def SetBase(self, base = None):
@@ -3667,11 +3748,11 @@ class Renderer_Spin(wx.dataview.DataViewSpinRenderer):
 
 		minimum = _Munge(self, self.minimum, returnMunger_onFail = True)
 		if (minimum is None):
-			minimum = 0
+			minimum = -999_999_999
 
 		maximum = _Munge(self, self.maximum, returnMunger_onFail = True)
 		if (maximum is None):
-			maximum = 100
+			maximum = 999_999_999
 
 		ctrl = wx.SpinCtrl(parent, pos = labelRect.Position, size = labelRect.Size, min = minimum, max = maximum, initial = value)
 
@@ -3698,19 +3779,39 @@ class Renderer_Bmp(wx.dataview.DataViewBitmapRenderer):
 
 class Renderer_Icon(wx.dataview.DataViewIconTextRenderer):
 	"""
+	Depending on what *icon* is initially will determine how 
+	the value returned by by *valueGetter* for the assigned *ColumnDefn* is used.
+		- If *icon* == None: The value should be a list, where the first element is
+			the text to display, and the second element is a wxBitmap.
+		- If *icon* != None: The value should be the text to display.
+			*icon* should be a wxBitmap or function that returns a wxBitmap.
 	"""
 
-	def __init__(self, **kwargs):
+	def __init__(self, icon = None, ellipsize = True, **kwargs):
 		_log("@Renderer_Icon.__init__", kwargs)
 
 		wx.dataview.DataViewIconTextRenderer.__init__(self, **kwargs)
 		self.type = "icon"
 		self.buildingKwargs = {**kwargs}
 
+		self.SetEllipsize(ellipsize)
+		self.SetIcon(icon)
+
+	def SetIcon(self, icon = None):
+		self.icon = icon
+		self.buildingKwargs["icon"] = icon
+
 	def Clone(self, **kwargs):
 		#Any keywords in kwargs will override keywords in buildingKwargs
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
+
+	def SetEllipsize(self, ellipsize = None):
+		self.ellipsize = ellipsize
+		self.buildingKwargs["ellipsize"] = ellipsize
+
+		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_MIDDLE,
+			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 rendererCatalogue = {
 	None:        {"edit": wx.dataview.DATAVIEW_CELL_EDITABLE, 		"nonEdit": wx.dataview.DATAVIEW_CELL_ACTIVATABLE, 	"class": Renderer_Text},
