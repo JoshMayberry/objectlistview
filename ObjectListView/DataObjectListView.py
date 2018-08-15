@@ -380,7 +380,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewCtrl.html#wx.dataview.DataViewCtrl.AppendColumn
 		defn.SetEditable(refreshColumn = False)
 		defn.column = wx.dataview.DataViewColumn(defn.title, defn.renderer, index or len(self.columns) - 1, 
-			width = defn.width, align = defn.GetAlignment(), flags = wx.COL_WIDTH_AUTOSIZE)
+			width = defn.width, align = defn.GetAlignment())#, flags = wx.COL_WIDTH_AUTOSIZE)
 		defn.SetHidden()
 		defn.SetSortable()
 		defn.SetResizeable()
@@ -792,7 +792,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Return the column by which the rows should be grouped
 		"""
-		print("@1", self.alwaysGroupByColumnIndex, self.GetSortColumn(*args, **kwargs))
 		if (self.alwaysGroupByColumnIndex >= 0):
 			return self.GetAlwaysGroupByColumn(*args, **kwargs)
 
@@ -2704,13 +2703,15 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				return 0
 		
 		elif (isinstance(defn.renderer, (wx.dataview.DataViewIconTextRenderer, Renderer_Icon))):
-			icon = _Munge(node, defn.renderer.icon, extraArgs = [defn])
+			icon = _Munge(node, defn.renderer.icon, extraArgs = [defn], returnMunger_onFail = True)
 			if (icon == None):
-				return wx.dataview.DataViewIconText(text = value[0], icon = value[1])
+				icon = wx.Icon(wx.NullBitmap)
+			if (value == None):
+				value = ""
 			return wx.dataview.DataViewIconText(text = value, icon = icon)
-		
+
 		elif (isinstance(defn.renderer, Renderer_MultiImage)):
-			image = _Munge(node, defn.renderer.image, extraArgs = [defn])
+			image = _Munge(node, defn.renderer.image, extraArgs = [defn], returnMunger_onFail = True)
 			if (isinstance(image, (list, tuple, set, types.GeneratorType))):
 				return image
 			else:
@@ -2737,6 +2738,9 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			defn = self.olv.columns[column]
 		except AttributeError:
 			raise AttributeError(f"There is no column {column}")
+
+		if (isinstance(defn.renderer, (wx.dataview.DataViewIconTextRenderer, Renderer_Icon))):
+			value = value.GetText()
 
 		# print("@model.SetValue", value, node.__repr__(), column, defn.valueSetter, defn.valueGetter)
 		if (defn.valueSetter is None):
@@ -3781,10 +3785,8 @@ class Renderer_Icon(wx.dataview.DataViewIconTextRenderer):
 	"""
 	Depending on what *icon* is initially will determine how 
 	the value returned by by *valueGetter* for the assigned *ColumnDefn* is used.
-		- If *icon* == None: The value should be a list, where the first element is
-			the text to display, and the second element is a wxBitmap.
-		- If *icon* != None: The value should be the text to display.
-			*icon* should be a wxBitmap or function that returns a wxBitmap.
+	*icon* should be a wxBitmap or function that returns a wxBitmap; if it is None,
+	then no icon will be drawn.
 	"""
 
 	def __init__(self, icon = None, ellipsize = True, **kwargs):
