@@ -151,7 +151,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		#Standard
 		self.columns = {}
 		self.modelObjects = []
-		self.colorOverride = {}
+		self.colorOverride_row = {}
+		self.colorOverride_cell = {}
+		self.colorOverride_column = {}
 		self.lastSelected = None
 
 		useWeakRefs 			= kwargs.pop("useWeakRefs", False)
@@ -437,20 +439,63 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		self.emptyListFont = font
 
-	def SetBackgroundColour(self, model, color = None):
+	def SetRowColour(self, modelObject, color = None):
 		"""
-		Changes the background color for the specified model only.
+		Changes the cell color for the entire row of the specified modelObject only.
+
 		If *color* is None, the default color will be used. If *color* is a list, 
 		the first element will be the color if the row if odd; 
 		the second element will be the color if the row is even.
 		"""
 
 		if (color != None):
-			self.colorOverride[model] = color
-		elif (model in self.colorOverride):
-			del self.colorOverride[model]
+			self.colorOverride_row[modelObject] = color
+		elif (modelObject in self.colorOverride_row):
+			del self.colorOverride_row[modelObject]
 
-		# self.model.ItemChanged(model)
+		# self.model.ItemChanged(modelObject)
+		self.model.Cleared()
+
+	def SetColumnColour(self, column, color = None):
+		"""
+		Changes the cell color for the entire given column only.
+
+		If *color* is None, the default color will be used. If *color* is a list, 
+		the first element will be the color if the row if odd; 
+		the second element will be the color if the row is even.
+		"""
+
+		defn = self.GetColumn(column)
+		if (defn == None):
+			return
+
+		index = defn.GetIndex()
+		if (color != None):
+			self.colorOverride_column[index] = color
+		elif (index in self.colorOverride_column):
+			del self.colorOverride_column[index]
+
+		self.model.Cleared()
+
+	def SetCellColour(self, modelObject, column, color = None):
+		"""
+		Changes the cell color for the specified modelObject and given column.
+
+		If *color* is None, the default color will be used. If *color* is a list, 
+		the first element will be the color if the row if odd; 
+		the second element will be the color if the row is even.
+		"""
+
+		defn = self.GetColumn(column)
+		if (defn == None):
+			return
+
+		index = defn.GetIndex()
+		if (color != None):
+			self.colorOverride_cell[(modelObject, index)] = color
+		elif ((modelObject, index) in self.colorOverride_cell):
+			del self.colorOverride_cell[(modelObject, index)]
+
 		self.model.Cleared()
 
 	def SetFilter(self, myFilter, repopulate = True):
@@ -511,6 +556,21 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Returns a list of all columns.
 		"""
 		return self.columns
+
+	def GetColumn(self, column):
+		"""
+		Returns the requested column, or None if it does not exist.
+		*column* can be the column number or what *valueGetter* is for the desired column.
+		"""
+
+		if (isinstance(column, DataColumnDefn)):
+			return column
+		if (isinstance(column, int)):
+			return self.columns.get(column, None)
+
+		for defn in self.columns.values():
+			if (defn.valueGetter == column):
+				return defn
 
 	def GetCurrentColumn(self):
 		"""
@@ -2539,17 +2599,28 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		#Override this to indicate that the item has special font attributes.
 		#The base class version always simply returns False.
 		# _log("@model.GetAttr", item, column, attribute)
-		# return super().GetAttr(item, column, attribute)
 
 		node = self.ItemToObject(item)
-		if (node in self.olv.colorOverride):
+		def applyColor(color, odd = None):
+			nonlocal node
 			try:
-				attribute.SetBackgroundColour(self.olv.colorOverride[node])
+				attribute.SetBackgroundColour(color)
 			except TypeError:
-				if ((node not in self.colorCatalogue) or (self.colorCatalogue[node] is self.olv.oddRowsBackColor)):
-					attribute.SetBackgroundColour(self.olv.colorOverride[node][0])
+				if (odd == None):
+					odd = (node not in self.colorCatalogue) or (self.colorCatalogue[node] is self.olv.oddRowsBackColor)
+				if (odd):
+					attribute.SetBackgroundColour(color[0])
 				else:
-					attribute.SetBackgroundColour(self.olv.colorOverride[node][1])
+					attribute.SetBackgroundColour(color[1])
+
+		if ((node, column) in self.olv.colorOverride_cell):
+			applyColor(self.olv.colorOverride_cell[(node, column)])
+
+		elif (column in self.olv.colorOverride_column):
+			applyColor(self.olv.colorOverride_column[column])
+
+		elif (node in self.olv.colorOverride_row):
+			applyColor(self.olv.colorOverride_row[node])
 		
 		elif (not isinstance(node, DataListGroup)):
 			if (self.sortCounter != None):
@@ -2559,10 +2630,10 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 					else:
 						self.sort_colorCatalogue[node] = self.olv.oddRowsBackColor
 					self.sortCounter += 1
-				attribute.SetBackgroundColour(self.sort_colorCatalogue[node])
+				applyColor(self.sort_colorCatalogue[node])
 			elif (node in self.colorCatalogue):
-				attribute.SetBackgroundColour(self.colorCatalogue[node])
-		
+				applyColor(self.colorCatalogue[node])
+
 		else:
 			attribute.SetBold(self.olv.groupFont[0])
 			attribute.SetItalic(self.olv.groupFont[1])
