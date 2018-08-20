@@ -6,63 +6,6 @@
 # Copyright:    (c) 2008 Phillip Piper
 # License:      wxWindows license
 #----------------------------------------------------------------------------
-# Change log:
-# 2009-06-09  JPP   - AutoSizeColumns() now updates space filling columns
-#                   - FastObjectListView.RepopulateList() now uses Freeze/Thaw
-#                   - Fixed bug with virtual lists being clearws when scrolled vertically
-# 2008-12-16  JPP   - Removed flicker from RefreshObject() on FastObjectListView and GroupListView
-# 2008-12-01  JPP   - Handle wierd toggle check box on selection when there is no selection
-#                   - Fixed bug in RefreshObjects() when the list is empty
-# 2008-11-30  JPP   - Fixed missing variable bug in CancelCellEdit()
-# v1.2
-# 2008/09/02  JPP   - Added BatchedUpdate adaptor
-#                   - Improved speed of selecting and refreshing by keeping a map
-#                     of objects to indicies
-#                   - Added GetIndexOf()
-#                   - Removed flicker from FastObjectListView.AddObjects() and RefreshObjects()
-# 2008/08/27  JPP   - Implemented filtering
-#                   - Added GetObjects() and GetFilteredObjects()
-#                   - Added resortNow parameter to SetSortColumn()
-# 2008/08/23  JPP   - Added AddObjects()/RemoveObjects() and friends
-#                   - Removed duplicate code when building/refreshing/adding objects
-#                   - One step closer to secondary sort column support
-# 2008/08/18  JPP   - Handle model objects that cannot be hashed
-#                   - Added CELL_EDIT_STARTED and CELL_EDIT_FINISHED events
-# 2008/08/16  JPP   - Added ensureVisible parameter to SelectObject()
-# 2008/08/05  JPP   - GroupListView is now implemented as a virtual list. Much faster!
-# v1.1
-# 2008/07/19  JPP   - Added GroupListView
-#                   - Broke common virtual list behaviour into AbstractVirtualListView
-# 2008/07/13  JPP   - Added CopySelectionToClipboard and CopyObjectsToClipboard
-# 2008/07/08  JPP   - Fixed several Linux specific bugs/limits
-# 2008/07/03  JPP   - Allow headers to have images
-# v1.0.1
-# 2008/06/22  JPP   - Allowed for custom sorting, even on virtual lists
-#                   - Fixed bug where an imageGetter that returned 0 was treated
-#                     as if it returned -1 (i.e. no image)
-# 2008/06/17  JPP   - Use binary searches when searching on sorted columns
-# 2008/06/16  JPP   - Search by sorted column works, even on virtual lists
-# 2008/06/12  JPP   - Added sortable parameter
-#                   - Renamed sortColumn to be sortColumnIndex to make it clear
-#                   - Allow returns in multiline cell editors
-# v1.0
-# 2008/05/29  JPP   Used named images internally
-# 2008/05/26  JPP   Fixed pyLint annoyances
-# 2008/05/24  JPP   Images can be referenced by name
-# 2008/05/17  JPP   Checkboxes supported
-# 2008/04/18  JPP   Cell editing complete
-# 2008/03/31  JPP   Added space filling columns
-# 2008/03/29  JPP   Added minimum, maximum and fixed widths for columns
-# 2008/03/22  JPP   Added VirtualObjectListView and FastObjectListView
-# 2008/02/29  JPP   Version converted from wax
-# 2006/11/03  JPP   First version under wax
-#----------------------------------------------------------------------------
-# To do:
-# - selectable columns, triggered on right click on header
-# - secondary sort column
-# - optionally preserve selection on RepopulateList
-# - get rid of scrollbar when editing label in icon view
-# - need a ChangeView() method to help when switching between views
 
 """
 An `ObjectListView` provides a more convienent and powerful interface to a ListCtrl.
@@ -216,8 +159,26 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.groupTextColour 		= kwargs.pop("groupTextColour", wx.Colour(33, 33, 33, 255))
 		self.groupBackgroundColour 	= kwargs.pop("groupBackgroundColour", wx.Colour(159, 185, 250, 249))
 
+		#Key Events
+		self.scrollKeys 			= kwargs.pop("scrollKeys", True)
+		self.handleStandardKeys 	= kwargs.pop("handleStandardKeys", True)
+
+		self.clipSimple 		= kwargs.pop("clipSimple", True)
+		self.clipPrefix 		= kwargs.pop("clipPrefix", "\n")
+		self.clipSuffix 		= kwargs.pop("clipSuffix", "\n")
+		self.clipColumnSpacer 	= kwargs.pop("clipColumnSpacer", "\t")
+		
+		self.clipRowSpacer 	= kwargs.pop("clipRowSpacer", "\n")
+		self.clipRowPrefix 	= kwargs.pop("clipRowPrefix", "")
+		self.clipRowSuffix 	= kwargs.pop("clipRowSuffix", "")
+		
+
+		self.clipGroup 			= kwargs.pop("clipGroup", True)
+		self.clipGroupSpacer 	= kwargs.pop("clipGroupSpacer", None)
+		self.clipGroupPrefix 	= kwargs.pop("clipGroupPrefix", "\n")
+		self.clipGroupSuffix 	= kwargs.pop("clipGroupSuffix", None)
+
 		#Etc
-		self.handleStandardKeys = True
 		self.emptyListMsg 		= kwargs.pop("emptyListMsg", "This list is empty")
 		self.emptyListFilterMsg = kwargs.pop("emptyListFilterMsg", None)
 		self.emptyListFont 		= kwargs.pop("emptyListFont", wx.Font(24, wx.DEFAULT, wx.NORMAL, wx.NORMAL, 0, ""))
@@ -263,6 +224,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.overlayEmptyListMsg = wx.Overlay()
 
 		#Bind Functions
+		self.Bind(wx.EVT_CHAR, self._HandleChar)
 		self.Bind(wx.EVT_SIZE, self._HandleSize)
 		self.Bind(wx.dataview.EVT_DATAVIEW_COLUMN_HEADER_CLICK, self._HandleColumnClick)
 
@@ -344,6 +306,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if (self.hideFirstIndent and (not self.showGroups)):
 			x = self.AddColumnDefn(DataColumnDefn(title = "", width = 0))
 			x.isInternal = True
+			# self.SetExpanderColumn(x.column)
 
 		for x in columns:
 			if (x.isInternal):
@@ -581,7 +544,60 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			return
 		return self.columns[column.GetModelColumn()]
 
+	def GetCurrentObject(self):
+		"""
+		Return the model object that currently has focus.
+		"""
+
+		item = self.GetCurrentItem()
+		if (not item.IsOk()):
+			return
+		return self.model.ItemToObject(item)
+
+	def GetFirst(self):
+		"""
+		Return the first model object.
+		"""
+
+		item = self.model.GetFirstItem()
+		if (item.IsOk()):
+			return self.model.ItemToObject(item)
+
+	def GetLast(self):
+		"""
+		Return the last model object.
+		"""
+
+		item = self.model.GetLastItem()
+		if (item.IsOk()):
+			return self.model.ItemToObject(item)
+
+	def GetNext(self, modelObject, wrap = True):
+		"""
+		Return the item below the given model object.
+		"""
+
+		item = self.model.GetNextItem(modelObject, wrap = wrap)
+		if (item.IsOk()):
+			return self.model.ItemToObject(item)
+
+	def GetPrevious(self, modelObject, wrap = True):
+		"""
+		Return the item above the given model object.
+		"""
+
+		item = self.model.GetPreviousItem(modelObject, wrap = wrap)
+		if (item.IsOk()):
+			return self.model.ItemToObject(item)
+
 	#Selection Functions
+	def SetCurrentObject(self, modelObject):
+		"""
+		Set the model object that currently has focus.
+		"""
+
+		self.SetCurrentItem(self.model.ObjectToItem(modelObject))
+
 	def YieldSelected(self):
 		"""
 		Progressively yield all selected items
@@ -671,12 +687,16 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		item = self.model.ObjectToItem(modelObject)
 		super().Unselect(item)
 
-	def SelectAll(self):
+	def SelectAll(self, override_singleSelect = True):
 		"""
 		Selected all model objects in the control.
 
 		In a GroupListView, this does not select blank lines or groups
 		"""
+
+		if ((not override_singleSelect) and (self.singleSelect)):
+			return self.SelectFirst()
+
 		super().SelectAll()
 
 	def UnselectAll(self):
@@ -684,6 +704,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Unselect all model objects in the control.
 		"""
 		super().UnselectAll()
+
+	DeselectAll = UnselectAll
+	Deselect = Unselect
 
 	def SelectObject(self, modelObject, deselectOthers = True, ensureVisible = False):
 		"""
@@ -726,6 +749,63 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		for x in modelObjects:
 			self.SelectGroup(x, deselectOthers = False)
+
+	def SelectFirst(self):
+		"""
+		Select the first item in the list.
+		"""
+
+		item = self.model.GetFirstItem()
+		super().Select(item)
+
+	def SelectLast(self):
+		"""
+		Select the last item in the list.
+		"""
+
+		item = self.model.GetLastItem()
+		super().Select(item)
+
+	def SelectNext(self, deselectOthers = True, wrap = True):
+		"""
+		Select the item(s) below the currently selected item(s).
+		"""
+
+		selection = []
+		for item in self.GetSelections():
+			selection.append(self.model.GetNextItem(item, wrap = wrap))
+		if (not selection):
+			if (wrap):
+				selection = [self.model.GetLastItem()]
+			else:
+				selection = [self.model.GetFirstItem()]
+
+		if (deselectOthers):
+			self.UnselectAll()
+
+		for item in selection:
+			super().Select(item)
+
+	def SelectPrevious(self, deselectOthers = True, wrap = True):
+		"""
+		Select the item(s) above the currently selected item(s).
+		"""
+
+		selection = []
+		for item in self.GetSelections():
+			selection.append(self.model.GetPreviousItem(item, wrap = wrap))
+		if (not selection):
+			if (wrap):
+				selection = [self.model.GetFirstItem()]
+			else:
+				selection = [self.model.GetLastItem()]
+		
+		if (deselectOthers):
+			self.UnselectAll()
+
+		for item in selection:
+			print("@1", self.model.ItemToObject(item).title)
+			super().Select(item)
 
 	#Show functions
 	def GetShowItemCounts(self):
@@ -1369,43 +1449,28 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			self.RepopulateList()
 
 	#Editing
-	# def _PossibleStartCellEdit(self, rowIndex, subItemIndex):
-	# 	"""
-	# 	Start an edit operation on the given cell after performing some sanity checks
-	# 	"""
-	# 	return
-	# 	# if 0 > rowIndex >= self.GetItemCount():
-	# 	# 	return
+	def StartCellEdit(self, objectModel, defn):
+		"""
+		Start an edit operation on the given cell.
+		"""
 
-	# 	# if 0 > subItemIndex >= self.GetColumnCount():
-	# 	# 	return
+		self.EditItem(self.model.ObjectToItem(objectModel), defn.column)
 
-	# 	# if self.cellEditMode == self.CELLEDIT_NONE:
-	# 	# 	return
+	def _PossibleStartCellEdit(self, objectModel, defn):
+		"""
+		Start an edit operation on the given cell after performing some sanity checks.
+		"""
 
-	# 	# if not self.columns[subItemIndex].isEditable:
-	# 	# 	return
+		if (objectModel == None):
+			return
 
-	# 	# if self.GetObjectAt(rowIndex) is None:
-	# 	# 	return
+		if (defn.column == None):
+			return
 
-	# 	# self.StartCellEdit(rowIndex, subItemIndex)
+		if (not defn.IsEditable()):
+			return
 
-	# def _PossibleFinishCellEdit(self):
-	# 	"""
-	# 	If a cell is being edited, finish and commit an edit operation on the given cell.
-	# 	"""
-	# 	return
-	# 	# if self.IsCellEditing():
-	# 	# 	self.FinishCellEdit()
-
-	# def _PossibleCancelCellEdit(self):
-	# 	"""
-	# 	If a cell is being edited, cancel the edit operation.
-	# 	"""
-	# 	return
-	# 	# if self.IsCellEditing():
-	# 	# 	self.CancelCellEdit()
+		self.StartCellEdit(objectModel, defn)
 
 	#-------------------------------------------------------------------------
 	# Calculating
@@ -1486,8 +1551,268 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 	# 	return (rowIndex, 0, -1)
 
-	# #-------------------------------------------------------------------------
-	# # Event handling
+	#-------------------------------------------------------------------------
+	# Copy / Paste
+
+	def CopyObjectsToClipboard(self, modelObjects):
+		"""
+		Put a textual representation of the given objects onto the clipboard.
+
+		What amount of control the user has over what the data looks like is based on
+		the paramter *clipSimple*.
+
+		If *clipSimple* == True:
+			By default, rows will be on separate lines and columns will be separated by tabs.
+			The parameters *clipRowSpacer* and *clipColumnSpacer* can change this.
+
+			If a group is copied, an extra new line and the name of that group will be
+			placed on the clipboard.
+
+			By default, a new line is appended to the clipboard.
+			The parameter *clipSuffix* can change what (if anything) is added.
+			The parameter *clipPrefix* can change append text to the start.
+
+		If *clipSimple* == False:
+			By default, rows will be on separate lines and columns will be separated by tabs.
+			The parameters *clipRowSpacer* and *clipColumnSpacer* can change this.
+			Each row is sandwiched between *clipRowPrefix* and *clipRowSuffix*.
+
+			By default, a new line is appended to the clipboard.
+			The parameter *clipSuffix* can change what (if anything) is added.
+			The parameter *clipPrefix* can change append text to the start.
+
+			The parameter *clipGroup* controls what happens if a group is copied.
+				- *clipGroup* == None: The group will be ignored
+				- *clipGroup* == True: All items in the group will be copied
+				- *clipGroup* == False: The name of the group will be copied as a row
+
+			Copied group content will be separated by *clipGroupSpacer*, and sandwiched between
+			*clipGroupPrefix* and *clipGroupSuffix*. If any of thsoe three are None, their row
+			counterpart will be used.
+
+			The following can be functions that take the paramters that follow them:
+				*clipPrefix*: modelObjects
+				*clipSuffix*: modelObjects
+
+				*clipRowPrefix*: modelObject
+				*clipRowSuffix*: modelObject
+				*clipRowSpacer*: previousObject, modelObject
+				*clipColumnSpacer*: modelObject, previousColumn, column
+
+				*clipGroup*: group
+				*clipGroupPrefix*: group
+				*clipGroupSuffix*: group
+				*clipGroupSpacer*: previousGroup, group
+
+		This will be one line per object and tab-separated values per line.
+		"""
+
+		def getSimpleText():
+			nonlocal self, modelObjects
+
+			lines = []
+			for row in modelObjects:
+				if (isinstance(row, DataListGroup)):
+					lines.append(f"\n{row.title}")
+				else:
+					lines.append(f"{self.clipColumnSpacer or ''}".join((column.GetStringValue(row) for column in self.columns.values())))
+
+			text = f"{self.clipPrefix or ''}"
+			text += f"{self.clipRowSpacer or ''}".join(lines)
+			text += f"{self.clipSuffix or ''}"
+			return text
+
+		def getRowText(row):
+			nonlocal self
+
+			text = f"{_Munge(row, self.clipRowPrefix, returnMunger_onFail = True)}"
+
+			previousItem = None
+			for column in self.columns.values():
+				if (previousItem != None):
+					text += f"{_Munge(row, self.clipColumnSpacer, extraArgs = [previousItem, column], returnMunger_onFail = True)}"
+				text += column.GetStringValue(row)
+				previousItem = column
+
+			text += f"{_Munge(row, self.clipRowSuffix, returnMunger_onFail = True)}"
+			return text
+
+		def getGroupText(group, clipGroup):
+			nonlocal self
+
+			text = f"{_Munge(group, self.clipGroupPrefix, returnMunger_onFail = True)}"
+
+			if (not clipGroup):
+				text += f"{group.title}"
+			else:
+				lines = []
+				for row in group.modelObjects:
+					lines.append((row, getRowText(row)))
+				text += joinLines(lines)
+
+			text += f"{_Munge(group, self.clipGroupSuffix, returnMunger_onFail = True)}"
+			return text
+
+		def joinLines(lines):
+
+			text = ""
+
+			previousItem = None
+			for item, line in lines:
+				if (previousItem != None):
+					if (isinstance(item, DataListGroup) and (self.clipGroupSpacer != None)):
+						spacer = self.clipGroupSpacer
+					else:
+						spacer = self.clipRowSpacer or ''
+					text += f"{_Munge(previousItem, spacer, extraArgs = [item], returnMunger_onFail = True)}"
+				text += line
+				previousItem = item
+
+			return text
+
+		##########################################################
+
+		if (not modelObjects):
+			return
+
+		#Make a text version of the values
+		self.clipSimple = False
+		self.clipGroup = True
+
+		if (self.clipSimple):
+			text = getSimpleText()
+		else:
+			text = f"{_Munge(modelObjects, self.clipPrefix, returnMunger_onFail = True)}"
+
+			lines = []
+			for row in modelObjects:
+				if (not isinstance(row, DataListGroup)):
+					lines.append((row, getRowText(row)))
+				else:
+					clipGroup = _Munge(row, self.clipGroup, returnMunger_onFail = True)
+					if (clipGroup != None):
+						lines.append((row, getGroupText(row, clipGroup)))
+			text += joinLines(lines)
+			text += f"{_Munge(modelObjects, self.clipSuffix, returnMunger_onFail = True)}"
+
+		print("@0.2", text)
+
+		#Place text on clipboard
+		clipboard = wx.TextDataObject()
+		clipboard.SetText(text)
+
+		if (wx.TheClipboard.Open()):
+			if (wx.TheClipboard.SetData(clipboard)):
+				wx.TheClipboard.Flush()
+			wx.TheClipboard.Close()
+		else:
+			wx.MessageBox("Can't open the clipboard", "Error")
+
+	def CopySelectionToClipboard(self):
+		"""
+		Copy the selected objects to the clipboard.
+		"""
+
+		# if (self.clipGroup == None):
+
+		self.CopyObjectsToClipboard(list(self.YieldSelected()))
+
+	#-------------------------------------------------------------------------
+	# Event handling
+
+	def _HandleChar(self, event):
+
+		key = event.GetUnicodeKey()
+		if (key == wx.WXK_NONE):
+			key = event.GetKeyCode()
+
+		controlDown = event.CmdDown()
+		altDown = event.AltDown()
+		shiftDown = event.ShiftDown()
+		if (self.scrollKeys):
+			if (key == wx.WXK_UP):
+				self.SelectPrevious()
+				return
+			if (key == wx.WXK_DOWN):
+				self.SelectNext()
+				return
+		if (self.handleStandardKeys):
+			if (key == wx.WXK_LEFT):
+				self.CollapseAll(self.GetSelectedGroups())
+				return
+			if (key == wx.WXK_RIGHT):
+				self.ExpandAll(self.GetSelectedGroups())
+				return
+			if (key == wx.WXK_CONTROL_C):
+				self.CopySelectionToClipboard()
+				return
+			if (key == wx.WXK_CONTROL_A):
+				self.SelectAll(override_singleSelect = False)
+				return
+			if (key == wx.WXK_ESCAPE):
+				self.UnselectAll()
+				return
+			if (key in [wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER]):
+				self._PossibleStartCellEdit(self.GetCurrentObject(), self.GetPrimaryColumn())
+				return
+
+		event.Skip()
+
+	def _HandleTypingEvent(self, event):
+		"""
+		"""
+		if self.GetItemCount() == 0 or self.GetColumnCount() == 0:
+			return False
+
+		if event.GetModifiers() != 0 and event.GetModifiers() != wx.MOD_SHIFT:
+			return False
+
+		if event.GetKeyCode() > wx.WXK_START:
+			return False
+
+		if event.GetKeyCode() in (wx.WXK_BACK, wx.WXK_DELETE):
+			self.searchPrefix = u""
+			return True
+
+		# On which column are we going to compare values? If we should search on the
+		# sorted column, and there is a sorted column and it is searchable, we use that
+		# one, otherwise we fallback to the primary column
+		if self.typingSearchesSortColumn and self.GetSortColumn(
+		) and self.GetSortColumn().isSearchable:
+			searchColumn = self.GetSortColumn()
+		else:
+			searchColumn = self.GetPrimaryColumn()
+
+		# On Linux, GetUnicodeKey() always returns 0 -- on my 2.8.7.1
+		# (gtk2-unicode)
+		uniKey = event.UnicodeKey
+		if uniKey == 0:
+			uniChar = six.unichr(event.KeyCode)
+		else:
+			# on some versions of wxPython UnicodeKey returns the character
+			# on others it is an integer
+			if isinstance(uniKey, int):
+				uniChar = six.unichr(uniKey)
+			else:
+				uniChar = uniKey
+		if not self._IsPrintable(uniChar):
+			return False
+
+		# On Linux, event.GetTimestamp() isn't reliable so use time.time()
+		# instead
+		timeNow = time.time()
+		if (timeNow - self.whenLastTypingEvent) > self.SEARCH_KEYSTROKE_DELAY:
+			self.searchPrefix = uniChar
+		else:
+			self.searchPrefix += uniChar
+		self.whenLastTypingEvent = timeNow
+
+		#self.__rows = 0
+		self._FindByTyping(searchColumn, self.searchPrefix)
+		# log "Considered %d rows in %2f secs" % (self.__rows, time.time() -
+		# timeNow)
+
+		return True
 
 	def _HandleColumnClick(self, event):
 		"""
@@ -2644,6 +2969,11 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		return True
 
+	def GetChildrenList(self, parent):
+		children = wx.dataview.DataViewItemArray()
+		self.GetChildren(parent, children)
+		return list(children)
+
 	def GetChildren(self, parent, children):
 		#Override this so the control can query the child items of an item.
 		#Returns the number of items.
@@ -2735,6 +3065,83 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 					return self.ObjectToItem(group)
 			_log("@model.GetParent - Null 2")
 			return wx.dataview.NullDataViewItem
+
+	def GetFirstItem(self):
+		children = self.GetChildrenList(wx.dataview.NullDataViewItem)
+		if (children):
+			return children[0]
+		return wx.dataview.NullDataViewItem
+
+	def GetLastItem(self):
+		children = self.GetChildrenList(wx.dataview.NullDataViewItem)
+		if (children):
+			return children[-1]
+		return wx.dataview.NullDataViewItem
+
+	def GetPreviousItem(self, item, wrap = False):
+		#Modified code from: http://docs.kicad-pcb.org/doxygen/wxdataviewctrl__helpers_8cpp_source.html
+		if (not isinstance(item, wx.dataview.DataViewItem)):
+			item = self.ObjectToItem(item)
+
+		previousItem = self.GetPreviousSibling(item)
+		if (not previousItem.IsOk()):
+			previousItem = self.GetParent(item)
+
+		elif (self.olv.IsExpanded(previousItem)):
+			children = self.GetChildrenList(previousItem)
+			previousItem = children[-1]
+
+		if (wrap and (not previousItem.IsOk())):
+			return self.GetLastItem()
+		return previousItem
+
+	def GetNextItem(self, item, wrap = False):
+		#Modified code from: http://docs.kicad-pcb.org/doxygen/wxdataviewctrl__helpers_8cpp_source.html
+		if (not isinstance(item, wx.dataview.DataViewItem)):
+			item = self.ObjectToItem(item)
+
+		if ((not item.IsOk()) or (self.olv.IsExpanded(item))):
+			children = self.GetChildrenList(item)
+			nextItem = children[0]
+		else:
+			#Walk up levels until we find one that has a next sibling
+			walk = item
+			while (walk.IsOk()):
+				nextItem = self.GetNextSibling(walk)
+				if (nextItem.IsOk()):
+					break
+				walk = self.GetParent(walk)
+			else:
+				nextItem = wx.dataview.NullDataViewItem
+
+		if (wrap and (not nextItem.IsOk())):
+			return self.GetFirstItem()
+		return nextItem
+
+	def GetPreviousSibling(self, item):
+		#Modified code from: http://docs.kicad-pcb.org/doxygen/wxdataviewctrl__helpers_8cpp_source.html
+		if (not isinstance(item, wx.dataview.DataViewItem)):
+			item = self.ObjectToItem(item)
+
+		previousItem = wx.dataview.NullDataViewItem
+		for sibling in self.GetChildrenList(self.GetParent(item)):
+			if (sibling == item):
+				break
+			previousItem = sibling
+		return previousItem
+
+	def GetNextSibling(self, item):
+		#Modified code from: http://docs.kicad-pcb.org/doxygen/wxdataviewctrl__helpers_8cpp_source.html
+		if (not isinstance(item, wx.dataview.DataViewItem)):
+			item = self.ObjectToItem(item)
+
+		returnNext = False
+		for sibling in self.GetChildrenList(self.GetParent(item)):
+			if (returnNext):
+				return sibling
+			if (sibling == item):
+				returnNext = True
+		return wx.dataview.NullDataViewItem
 
 	def GetValue(self, item, column, alternateGetter = None):
 		#Override this to indicate the value of item.
