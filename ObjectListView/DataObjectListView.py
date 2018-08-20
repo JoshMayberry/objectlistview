@@ -163,20 +163,28 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.scrollKeys 			= kwargs.pop("scrollKeys", True)
 		self.handleStandardKeys 	= kwargs.pop("handleStandardKeys", True)
 
-		self.clipSimple 		= kwargs.pop("clipSimple", True)
-		self.clipPrefix 		= kwargs.pop("clipPrefix", "\n")
-		self.clipSuffix 		= kwargs.pop("clipSuffix", "\n")
-		self.clipColumnSpacer 	= kwargs.pop("clipColumnSpacer", "\t")
+		#Copy/Paste
+		self.copiedList = []
+		self.lastClicked = (None, None)
+
+		self.clipSimple 			= kwargs.pop("clipSimple", True)
+		self.clipPrefix 			= kwargs.pop("clipPrefix", "\n")
+		self.clipSuffix 			= kwargs.pop("clipSuffix", "\n")
+		self.clipColumnSpacer 		= kwargs.pop("clipColumnSpacer", "\t")
+		self.clipKeepAfterClose 	= kwargs.pop("clipKeepAfterClose", True)
 		
 		self.clipRowSpacer 	= kwargs.pop("clipRowSpacer", "\n")
 		self.clipRowPrefix 	= kwargs.pop("clipRowPrefix", "")
 		self.clipRowSuffix 	= kwargs.pop("clipRowSuffix", "")
-		
 
 		self.clipGroup 			= kwargs.pop("clipGroup", True)
 		self.clipGroupSpacer 	= kwargs.pop("clipGroupSpacer", None)
 		self.clipGroupPrefix 	= kwargs.pop("clipGroupPrefix", "\n")
 		self.clipGroupSuffix 	= kwargs.pop("clipGroupSuffix", None)
+
+		self.pasteWrap 			= kwargs.pop("pasteWrap", True)
+		self.pasteToCell 		= kwargs.pop("pasteToCell", True)
+		self.pasteInSelection 	= kwargs.pop("pasteInSelection", False)
 
 		#Etc
 		self.emptyListMsg 		= kwargs.pop("emptyListMsg", "This list is empty")
@@ -528,8 +536,14 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		if (isinstance(column, DataColumnDefn)):
 			return column
+
+		if (isinstance(column, wx.dataview.DataViewColumn)):
+			column = column.GetModelColumn()
 		if (isinstance(column, int)):
-			return self.columns.get(column, None)
+			for item in self.columns.values():
+				if (item.GetIndex() == column):
+					return item
+			return
 
 		for defn in self.columns.values():
 			if (defn.valueGetter == column):
@@ -659,20 +673,61 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			if (isinstance(item, DataListGroup)):
 				yield item
 
+	def IsAnySelected(self):
+		"""
+		Returns if there is any selection at all.
+		"""
+
+		try:
+			next(iter(self.YieldSelected()))
+			return True
+		except StopIteration:
+			return False
+
+	def IsAnyObjectSelected(self):
+		"""
+		Returns if there is any object selection at all.
+		"""
+
+		try:
+			next(iter(self.YieldSelectedObjects()))
+			return True
+		except StopIteration:
+			return False
+
+	def IsAnyGroupSelected(self):
+		"""
+		Returns if there is any group selection at all.
+		"""
+
+		try:
+			next(iter(self.YieldSelectedGroups()))
+			return True
+		except StopIteration:
+			return False
+
 	def IsObjectSelected(self, modelObject):
 		"""
 		Is the given modelObject selected?
 		"""
-		return modelObject in self.GetSelectedObjects()
+		for item in self.YieldSelectedObjects():
+			if (item is modelObject):
+				return True
+		return False
 
 	def IsGroupSelected(self, group):
 		"""
 		Is the given group selected?
 		"""
 		if (isinstance(group, str)):
-			return group in [item.key for item in self.GetSelectedGroups()]
+			for item in self.YieldSelectedGroups():
+				if (item.key == group):
+					return True
 		else:
-			return group in self.GetSelectedGroups()
+			for item in self.YieldSelectedGroups():
+				if (item is group):
+					return True
+		return False
 
 	def SetSelections(self, modelObjects):
 		self.UnselectAll()
@@ -804,7 +859,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			self.UnselectAll()
 
 		for item in selection:
-			print("@1", self.model.ItemToObject(item).title)
 			super().Select(item)
 
 	#Show functions
@@ -1554,9 +1608,17 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	#-------------------------------------------------------------------------
 	# Copy / Paste
 
-	def CopyObjectsToClipboard(self, modelObjects):
+	def CopyObjectsToClipboard(self, modelObjects, columns):
 		"""
 		Put a textual representation of the given objects onto the clipboard.
+
+		*modelObjects* should be a list of model objects to copy.
+		*columns* should be a list of the columns to copy values from.
+
+		If the parameter *clipKeepAfterClose* == True, the copied data will be kept
+		after the program is closed (this may not work on Mac and Linux).
+		This parameter can be a function that returns a bool and accepts the
+		following parameters: copiedText.
 
 		What amount of control the user has over what the data looks like is based on
 		the paramter *clipSimple*.
@@ -1604,18 +1666,32 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				*clipGroupSuffix*: group
 				*clipGroupSpacer*: previousGroup, group
 
-		This will be one line per object and tab-separated values per line.
+		Also, the following is stored in the variable *copiedList*:
+			Each row will be copied into a dictionary, where each column is a key and their value
+			corresponds to the value of the cell of the column in that row. The key None contains the
+			row item itself. Each row is added to a list.
+
+			The parameter *clipGroup* controls what happens if a group is copied.
+				- *clipGroup* == None: The group will be ignored
+				- *clipGroup* == True: All items in the group will be copied
+				- *clipGroup* == False: The group will be copied
 		"""
 
+		event = self.TriggerEvent(DOLVEvent.CopyEvent, rows = modelObjects, columns = columns, returnEvent = True)
+		if (event.IsVetoed()):
+			return
+		if ((not event.rows) or (not event.columns)):
+			return
+
 		def getSimpleText():
-			nonlocal self, modelObjects
+			nonlocal self, event
 
 			lines = []
-			for row in modelObjects:
+			for row in event.rows:
 				if (isinstance(row, DataListGroup)):
 					lines.append(f"\n{row.title}")
 				else:
-					lines.append(f"{self.clipColumnSpacer or ''}".join((column.GetStringValue(row) for column in self.columns.values())))
+					lines.append(f"{self.clipColumnSpacer or ''}".join((column.GetStringValue(row) for column in event.columns)))
 
 			text = f"{self.clipPrefix or ''}"
 			text += f"{self.clipRowSpacer or ''}".join(lines)
@@ -1623,12 +1699,12 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			return text
 
 		def getRowText(row):
-			nonlocal self
+			nonlocal self, event
 
 			text = f"{_Munge(row, self.clipRowPrefix, returnMunger_onFail = True)}"
 
 			previousItem = None
-			for column in self.columns.values():
+			for column in event.columns:
 				if (previousItem != None):
 					text += f"{_Munge(row, self.clipColumnSpacer, extraArgs = [previousItem, column], returnMunger_onFail = True)}"
 				text += column.GetStringValue(row)
@@ -1654,6 +1730,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			return text
 
 		def joinLines(lines):
+			nonlocal self
 
 			text = ""
 
@@ -1670,22 +1747,38 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 			return text
 
+		def generateCopiedList():
+			nonlocal self, event
+
+			lines = []
+			for row in event.rows:
+				if (not isinstance(row, DataListGroup)):
+					contents = {None: row}
+					for column in event.columns:
+						contents[column.GetIndex()] = column.GetValue(row)
+					lines.append(contents)
+				elif (self.clipGroup != None):
+					if (self.clipGroup):
+						for subRow in row.modelObjects:
+							contents = {None: subRow}
+							for column in event.columns:
+								contents[column.GetIndex()] = column.GetValue(subRow)
+							lines.append(contents)
+					else:
+						lines.append(row)
+			return lines
+
 		##########################################################
 
-		if (not modelObjects):
-			return
-
 		#Make a text version of the values
-		self.clipSimple = False
-		self.clipGroup = True
-
+		self.copiedList = generateCopiedList()
 		if (self.clipSimple):
 			text = getSimpleText()
 		else:
-			text = f"{_Munge(modelObjects, self.clipPrefix, returnMunger_onFail = True)}"
+			text = f"{_Munge(event.rows, self.clipPrefix, returnMunger_onFail = True)}"
 
 			lines = []
-			for row in modelObjects:
+			for row in event.rows:
 				if (not isinstance(row, DataListGroup)):
 					lines.append((row, getRowText(row)))
 				else:
@@ -1693,29 +1786,214 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 					if (clipGroup != None):
 						lines.append((row, getGroupText(row, clipGroup)))
 			text += joinLines(lines)
-			text += f"{_Munge(modelObjects, self.clipSuffix, returnMunger_onFail = True)}"
-
-		print("@0.2", text)
+			text += f"{_Munge(event.rows, self.clipSuffix, returnMunger_onFail = True)}"
 
 		#Place text on clipboard
 		clipboard = wx.TextDataObject()
 		clipboard.SetText(text)
 
 		if (wx.TheClipboard.Open()):
-			if (wx.TheClipboard.SetData(clipboard)):
+			if (wx.TheClipboard.SetData(clipboard) and _Munge(text, self.clipKeepAfterClose, returnMunger_onFail = True)):
 				wx.TheClipboard.Flush()
 			wx.TheClipboard.Close()
 		else:
 			wx.MessageBox("Can't open the clipboard", "Error")
 
-	def CopySelectionToClipboard(self):
+	def CopySelectionToClipboard(self, entireRow = True):
 		"""
 		Copy the selected objects to the clipboard.
 		"""
 
-		# if (self.clipGroup == None):
+		if (entireRow):
+			columns = self.columns.values()
+		else:
+			columns = [self.lastClicked[1]]
 
-		self.CopyObjectsToClipboard(list(self.YieldSelected()))
+		self.CopyObjectsToClipboard(list(self.YieldSelected()), columns)
+
+	def PasteClipboardToSelection(self, entireRow = True):
+		"""
+		Copy the selected objects to the clipboard.
+		"""
+
+		self.PasteObjectsFromClipboard(list(self.YieldSelected()), entireRow = entireRow)
+
+	def PasteObjectsFromClipboard(self, modelObjects, entireRow = True):
+		"""
+		Paste what was copied into the selected row(s).
+
+		*entireRow* determines which column data is pasted to.
+			- If *entireRow* == True: All valid columns will be pasted to
+			- If *entireRow* == False: Only the column of the last cell clicked will be pasted to
+
+		The parameter *pasteWrap* determines what happens if there are more rows than content to paste.
+			- If *pasteWrap* == True: Use the first item in the copiedList and keep going from there 
+			- If *pasteWrap* == False: Skip the rest of the rows
+
+		The paramter *pasteInSelection* determines what happens if there are less rows than content to paste.
+			- If *pasteInSelection* == True: Only pastes what will fit 
+			- If *pasteInSelection* == False: Keeps going down the list until it reaches the bottom or there is no content left
+
+		The paramter *pasteToCell* determines what happens if *copiedList* == [] and the copied text
+		is not formatted for the columns.
+			- If *pasteToCell* == True: Paste the value to the cell last clicked
+			- If *pasteToCell* == False: Paste the value to the primary column
+
+		"""
+
+		event = self.TriggerEvent(DOLVEvent.PasteEvent, rows = modelObjects, columnClicked = self.lastClicked[1], copiedList = [*self.copiedList], returnEvent = True)
+		if (event.IsVetoed()):
+			return
+		if (not event.rows):
+			return
+
+		columnClicked = self.GetColumn(event.columnClicked)
+
+		def getClipboardText():
+			clipboard = wx.TextDataObject()
+			if (wx.TheClipboard.Open()):
+				wx.TheClipboard.GetData(clipboard)
+				wx.TheClipboard.Close()
+			else:
+				wx.MessageBox("Can't open the clipboard", "Error")
+				return
+			return clipboard.GetText()
+
+		def formatLines(lines):
+			nonlocal self
+
+			if (not self.pasteWrap):
+				return
+
+			def yieldIndex():
+				nonlocal lines
+
+				while True:
+					for index in range(len(lines)):
+						yield index
+
+			count = len(event.rows)
+			indexGenerator = yieldIndex()
+			while (len(lines) < count):
+				index = next(indexGenerator)
+				lines.append(lines[index])
+
+		def yieldRows():
+			nonlocal self, event
+
+			for row in event.rows:
+				yield row
+
+			if (self.pasteInSelection):
+				return
+
+			while True:
+				row = self.GetNext(row, wrap = False)
+				if (row == None):
+					break
+				yield row
+
+		def pasteSimple(text):
+			nonlocal self, event
+
+			_text = text.lstrip(f"{self.clipPrefix or ''}").rstrip(f"{self.clipSuffix or ''}")
+			if (not self.clipRowSpacer):
+				lines = [_text]
+			else:
+				lines = _text.split(f"{self.clipRowSpacer}")
+			formatLines(lines)
+
+			rows = yieldRows()
+			for i, line in enumerate(lines):
+				try:
+					row = next(rows)
+				except StopIteration:
+					break
+
+				if (not self.clipColumnSpacer):
+					columns = [line]
+				else:
+					columns = line.split(f"{self.clipColumnSpacer}")
+
+				if (len(columns) == 1):
+					if (self.pasteToCell):
+						pasteCell(row, columns[0])
+					else:
+						tryValue(row, self.GetPrimaryColumn(), columns[0])
+					continue
+
+				if ((not entireRow) and (columnClicked != None)):
+					index = columnClicked.GetIndex()
+					if (index in columns):
+						tryValue(row, self.GetColumn(index), columns[index])
+					continue
+
+				for index, value in enumerate(columns):
+					column = self.GetColumn(index)
+					if (column.isInternal):
+						continue
+					if (not isinstance(column.GetValue(row), type(value))):
+						try:
+							value = ast.literal_eval(value)
+						except Exception as error:
+							print(f"Malformed paste string for column {column.title} as {value} to replace {column.GetValue(row)}")
+							continue
+					column.SetValue(row, value)
+
+		def pasteCell(row, value):
+			nonlocal self, columnClicked
+
+			if (columnClicked == None):
+				return
+			
+			tryValue(row, columnClicked, value)
+
+		def tryValue(row, column, value):
+			if (column.renderer.type in ["bmp", "multi_bmp", "button"]):
+				return
+			if (column.isInternal):
+				return
+
+			_row = self.model.ObjectToItem(row)
+			_column = column.GetIndex()
+			oldValue = self.model.GetValue(_row, _column, raw = True)
+
+			try:
+				column.SetValue(row, value)
+				self.model.ValueChanged(_row, _column)
+				self.model.GetValue(_row, _column)
+			except:
+				self.model.ChangeValue(oldValue, _row, _column)
+
+		def pasteList(copiedList):
+			nonlocal self, entireRow, columnClicked
+
+			rows = yieldRows()
+			formatLines(copiedList)
+			for i, line in enumerate(copiedList):
+				try:
+					row = next(rows)
+				except StopIteration:
+					break
+
+				if ((not entireRow) and (columnClicked != None)):
+					index = columnClicked.GetIndex()
+					tryValue(row, self.GetColumn(index), line[index])
+					continue
+
+				for index, value in line.items():
+					if (index is None):
+						continue
+					tryValue(row, self.GetColumn(index), value)
+
+		#########################################################
+
+		if (event.copiedList):
+			return pasteList(event.copiedList)
+
+		text = getClipboardText()
+		if (text and self.clipSimple):
+			return pasteSimple(text)
 
 	#-------------------------------------------------------------------------
 	# Event handling
@@ -1726,9 +2004,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if (key == wx.WXK_NONE):
 			key = event.GetKeyCode()
 
-		controlDown = event.CmdDown()
-		altDown = event.AltDown()
-		shiftDown = event.ShiftDown()
 		if (self.scrollKeys):
 			if (key == wx.WXK_UP):
 				self.SelectPrevious()
@@ -1743,8 +2018,11 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			if (key == wx.WXK_RIGHT):
 				self.ExpandAll(self.GetSelectedGroups())
 				return
-			if (key == wx.WXK_CONTROL_C):
-				self.CopySelectionToClipboard()
+			if ((key == wx.WXK_CONTROL_C)):
+				self.CopySelectionToClipboard(entireRow = event.ShiftDown())
+				return
+			if ((key == wx.WXK_CONTROL_V)):
+				self.PasteClipboardToSelection(entireRow = event.ShiftDown())
 				return
 			if (key == wx.WXK_CONTROL_A):
 				self.SelectAll(override_singleSelect = False)
@@ -1904,7 +2182,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		return kwargs
 
-	def TriggerEvent(self, eventFunction, **kwargs):
+	def TriggerEvent(self, eventFunction, returnEvent = False, **kwargs):
 		"""
 		Allows the user to easily trigger an event remotely.
 
@@ -1913,6 +2191,8 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		newEvent = eventFunction(self, **kwargs)
 		self.GetEventHandler().ProcessEvent(newEvent)
+		if (returnEvent):
+			return newEvent
 		if (isinstance(newEvent, DOLVEvent.VetoableEvent)):
 			if (newEvent.IsVetoed()):
 				return False
@@ -1927,9 +2207,15 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			eventFrom.Veto()
 
 	def _RelaySelectionChanged(self, relayEvent):
+		model = relayEvent.GetModel()
+
+		#Record location
+		_row, _column = self.HitTest(self.ScreenToClient(wx.GetMousePosition()))
+		self.lastClicked = (model.ItemToObject(_row), self.GetColumn(_column))
+
 		#Do not fire this event if that row is already selecetd
 		try:
-			row = relayEvent.GetModel().ItemToObject(relayEvent.GetItem())
+			row = model.ItemToObject(relayEvent.GetItem())
 		except TypeError:
 			#Deselection with no new selection
 			relayEvent.Skip()
@@ -3143,7 +3429,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				returnNext = True
 		return wx.dataview.NullDataViewItem
 
-	def GetValue(self, item, column, alternateGetter = None):
+	def GetValue(self, item, column, alternateGetter = None, raw = False):
 		#Override this to indicate the value of item.
 		#A Variant is used to store the data.
 		# _log("@model.GetValue", item, column, alternateGetter)
@@ -3166,6 +3452,9 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			value = _Munge(node, alternateGetter, extraArgs = [defn])
 		else:
 			value = _Munge(node, defn.valueGetter, extraArgs = [defn])
+
+		if (raw):
+			return value
 
 		# print("@model.GetValue", defn.renderer, node.__repr__(), defn.valueGetter, value, defn.stringConverter)
 
@@ -3202,7 +3491,8 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def SetValue(self, value, item, column):
 		# This gets called in order to set a value in the data model.
 		# The most common scenario is that the wx.dataview.DataViewCtrl calls this method after the user changed some data in the view.
-		# This is the function you need to override in your derived class but if you want to call it, ChangeValue is usually more convenient as otherwise you need to manually call ValueChanged to update the control itself.
+		# This is the function you need to override in your derived class but if you want to call it, 
+		# ChangeValue is usually more convenient as otherwise you need to manually call ValueChanged to update the control itself.
 		_log("@model.SetValue", value, item, column)
 
 		# We're not allowing edits in column zero (see below) so we just need
@@ -3594,11 +3884,11 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def SetValue_both(self, value):
-		# _log("@Renderer_Button.SetValue_both", value)
+		# print("@Renderer_Button.SetValue_both", value)
 		self._node = value[0]
 		self._column = value[1]
 		self._text = value[2][0]
-		self._function = value[2][1]
+		self._applyFunction(value[2][1])
 
 		if (self.enabled != None):
 			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
@@ -3607,10 +3897,10 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def SetValue_function(self, value):
-		# _log("@Renderer_Button.SetValue_function", value)
+		# print("@Renderer_Button.SetValue_function", value)
 		self._node = value[0]
 		self._column = value[1]
-		self._function = value[2]
+		self._applyFunction(value[2])
 		self._text = _Munge(self._node, self.text, returnMunger_onFail = True)
 
 		if (self.enabled != None):
@@ -3620,10 +3910,10 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def SetValue_text(self, value):
-		# _log("@Renderer_Button.SetValue_text", value)
+		# print("@Renderer_Button.SetValue_text", value)
 		self._node = value[0]
 		self._column = value[1]
-		self._function = _Munge(self._node, self.function, returnMunger_onFail = True)
+		self._applyFunction(_Munge(self._node, self.function, returnMunger_onFail = True))
 		self._text = value[2]
 
 		if (self.enabled != None):
@@ -3636,7 +3926,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		# print("@Renderer_Button.SetValue", value, self.function, self.text)
 		self._node = value[0]
 		self._column = value[1]
-		self._function = _Munge(self._node, self.function, returnMunger_onFail = True)
+		self._applyFunction(_Munge(self._node, self.function, returnMunger_onFail = True))
 		self._text = _Munge(self._node, self.text, returnMunger_onFail = True)
 		self.extraArg = value[2]
 
@@ -3645,6 +3935,12 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		else:
 			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
 		return True
+
+	def _applyFunction(self, function):
+		if (callable(function)):
+			self._function = function
+		else:
+			self._function = None
 
 	def GetValue(self):
 		# _log("@Renderer_Button.GetValue")
@@ -3684,13 +3980,13 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 
 	def LeftClick(self, clickPos, cellRect, model, item, columnIndex):
 		# _log("@Renderer_Button.LeftClick", clickPos, cellRect, model, item, columnIndex)
-		if (self._enabled):
+		if (self._enabled and self._function):
 			self._function(model.ItemToObject(item), model.olv.columns[columnIndex])
 		return True
 
 	def LeftClick_extraArg(self, clickPos, cellRect, model, item, columnIndex):
 		# _log("@Renderer_Button.LeftClick", clickPos, cellRect, model, item, columnIndex)
-		if (self._enabled):
+		if (self._enabled and self._function):
 			self._function(model.ItemToObject(item), model.olv.columns[columnIndex], self.extraArg)
 		return True
 
@@ -3745,6 +4041,8 @@ class Renderer_File(wx.dataview.DataViewCustomRenderer):
 			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def SetValue(self, value):
+		if ((not self.single) and (not isinstance(value, (list, tuple)))):
+			value = [value]
 		self.value = value
 		return True
 
@@ -3908,6 +4206,9 @@ class Renderer_CheckBox(wx.dataview.DataViewToggleRenderer):
 		wx.dataview.DataViewToggleRenderer.__init__(self, mode = mode, **kwargs)
 		self.type = "check"
 		self.buildingKwargs = {**kwargs, "mode": mode}
+
+	def SetValue(self, value):
+		return super().SetValue(bool(value))
 
 	def Clone(self, **kwargs):
 		#Any keywords in kwargs will override keywords in buildingKwargs

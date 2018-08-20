@@ -60,6 +60,9 @@ def _EventMaker():
 (olv_EVT_DATA_COLUMN_HEADER_LEFT_CLICK, EVT_DATA_COLUMN_HEADER_LEFT_CLICK) = _EventMaker()
 (olv_EVT_DATA_COLUMN_HEADER_RIGHT_CLICK, EVT_DATA_COLUMN_HEADER_RIGHT_CLICK) = _EventMaker()
 
+(olv_EVT_DATA_COPY, EVT_DATA_COPY) = _EventMaker()
+(olv_EVT_DATA_PASTE, EVT_DATA_PASTE) = _EventMaker()
+
 #======================================================================
 # Event parameter blocks
 
@@ -419,3 +422,41 @@ class MenuItemSelectedEvent(VetoableEvent):
 		self.column = kwargs.pop("column", None)
 		self.row = kwargs.pop("row", None)
 		self.item = kwargs.pop("item", None)
+
+#----------------------------------------------------------------------------
+#Copy/Paste
+
+class CopyEvent(VetoableEvent):
+	"""
+	Values from items in the list will be copied.
+
+	Veto() will not allow the items to be copied.
+
+	The handler can mess with what rows and columns are copied from.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		VetoableEvent.__init__(self, olv_EVT_DATA_COPY)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.rows = kwargs.pop("rows", [])
+		self.columns = kwargs.pop("columns", [])
+
+class PasteEvent(VetoableEvent):
+	"""
+	Values from copied items will be pasted.
+
+	Veto() will not allow the items to be pasted.
+
+	The handler can mess with what values are pasted to what columns.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		VetoableEvent.__init__(self, olv_EVT_DATA_PASTE)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.rows = kwargs.pop("rows", [])
+		self.copiedList = kwargs.pop("copiedList", [])
+		self.columnClicked = kwargs.pop("columnClicked", -1)
