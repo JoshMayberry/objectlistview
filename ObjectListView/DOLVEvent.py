@@ -60,8 +60,17 @@ def _EventMaker():
 (olv_EVT_DATA_COLUMN_HEADER_LEFT_CLICK, EVT_DATA_COLUMN_HEADER_LEFT_CLICK) = _EventMaker()
 (olv_EVT_DATA_COLUMN_HEADER_RIGHT_CLICK, EVT_DATA_COLUMN_HEADER_RIGHT_CLICK) = _EventMaker()
 
+(olv_EVT_DATA_COPYING, EVT_DATA_COPYING) = _EventMaker()
 (olv_EVT_DATA_COPY, EVT_DATA_COPY) = _EventMaker()
+(olv_EVT_DATA_COPIED, EVT_DATA_COPIED) = _EventMaker()
+(olv_EVT_DATA_PASTING, EVT_DATA_PASTING) = _EventMaker()
 (olv_EVT_DATA_PASTE, EVT_DATA_PASTE) = _EventMaker()
+
+(olv_EVT_DATA_UNDO_EMPTY, EVT_DATA_UNDO_EMPTY) = _EventMaker()
+(olv_EVT_DATA_REDO_EMPTY, EVT_DATA_REDO_EMPTY) = _EventMaker()
+(olv_EVT_DATA_UNDO_FIRST, EVT_DATA_UNDO_FIRST) = _EventMaker()
+(olv_EVT_DATA_REDO_FIRST, EVT_DATA_REDO_FIRST) = _EventMaker()
+
 
 #======================================================================
 # Event parameter blocks
@@ -159,6 +168,7 @@ class ColumnHeaderRightClickEvent(wx.PyCommandEvent):
 	"""
 	A column header has been right-clicked.
 	Note: Currently this event is not generated in the native OS X versions of wx.dataview.DataViewCtrl
+	Will not fire if *showLabelContextMenu* is True.
 	"""
 
 	def __init__(self, objectListView, **kwargs):
@@ -426,7 +436,7 @@ class MenuItemSelectedEvent(VetoableEvent):
 #----------------------------------------------------------------------------
 #Copy/Paste
 
-class CopyEvent(VetoableEvent):
+class CopyingEvent(VetoableEvent):
 	"""
 	Values from items in the list will be copied.
 
@@ -436,14 +446,61 @@ class CopyEvent(VetoableEvent):
 	"""
 
 	def __init__(self, objectListView, **kwargs):
+		VetoableEvent.__init__(self, olv_EVT_DATA_COPYING)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.text = None
+		self.rows = kwargs.pop("rows", [])
+		self.columns = kwargs.pop("columns", [])
+
+	def SetText(self, text = None):
+		"""
+		Set the text to be put on the clipboard yourself.
+		If *text* == None, the program will determine what the clipboard should look like.
+		"""
+		self.text = text
+
+class CopiedEvent(wx.PyCommandEvent):
+	"""
+	Allows the user to modify *log* (the 'what was copied list of dictionaries') 
+	before it is saved.	*text* can also be modified before it goes on the clipboard.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_COPIED, -1)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.log = kwargs.pop("log", [])
+		self.text = kwargs.pop("text", "")
+		self.rows = kwargs.pop("rows", [])
+		self.columns = kwargs.pop("columns", [])
+
+class CopyEvent(VetoableEvent):
+	"""
+	A row is going to be copied.
+
+	Veto() will not allow the item to be copied.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
 		VetoableEvent.__init__(self, olv_EVT_DATA_COPY)
 		self.SetEventObject(objectListView)
 		self.objectListView = objectListView
 
-		self.rows = kwargs.pop("rows", [])
+		self.row = kwargs.pop("row", [])
 		self.columns = kwargs.pop("columns", [])
+		self.text = None
 
-class PasteEvent(VetoableEvent):
+	def SetText(self, text = None):
+		"""
+		Set the text to be put on the clipboard yourself.
+		If *text* == None, the program will determine what the clipboard should look like.
+		"""
+		self.text = text
+
+class PastingEvent(VetoableEvent):
 	"""
 	Values from copied items will be pasted.
 
@@ -453,10 +510,86 @@ class PasteEvent(VetoableEvent):
 	"""
 
 	def __init__(self, objectListView, **kwargs):
+		VetoableEvent.__init__(self, olv_EVT_DATA_PASTING)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.log = kwargs.pop("log", [])
+		self.rows = kwargs.pop("rows", [])
+		self.column = kwargs.pop("column", -1)
+
+class PasteEvent(VetoableEvent):
+	"""
+	A row is going to be pasted.
+
+	Veto() will not allow the item to be pasted.
+
+	Handled() will cause the program to skip changing the value, but still update the cell.
+	If you handle it on your own, your change will not be placed in the undo history
+	unless you add it to the history yourself.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
 		VetoableEvent.__init__(self, olv_EVT_DATA_PASTE)
 		self.SetEventObject(objectListView)
 		self.objectListView = objectListView
 
-		self.rows = kwargs.pop("rows", [])
-		self.copiedList = kwargs.pop("copiedList", [])
-		self.columnClicked = kwargs.pop("columnClicked", -1)
+		self.row = kwargs.pop("row", [])
+		self.value = kwargs.pop("value", None)
+		self.column = kwargs.pop("column", [])
+		self.editCanceled = kwargs.pop("editCanceled", None)
+		self.wasHandled = False
+
+	def Handled(self, wasHandled = True):
+		"""
+		Indicate that the event handler has changed the value.
+		The OLV will handle other tasks like updating the cell.
+		"""
+		self.wasHandled = wasHandled
+
+#----------------------------------------------------------------------------
+#Undo/Redo
+
+class UndoEmptyEvent(wx.PyCommandEvent):
+	"""
+	Notifies the user that the undo history is empty.
+	This is a good time to disable whatever widget calls the undo action
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_UNDO_EMPTY, -1)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+class RedoEmptyEvent(wx.PyCommandEvent):
+	"""
+	Notifies the user that the redo history is empty.
+	This is a good time to disable whatever widget calls the redo action
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_REDO_EMPTY, -1)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+class UndoFirstEvent(wx.PyCommandEvent):
+	"""
+	Notifies the user that the undo history has recieved it's first action.
+	This is a good time to enable whatever widget calls the undo action
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_UNDO_FIRST, -1)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+class RedoFirstEvent(wx.PyCommandEvent):
+	"""
+	Notifies the user that the redo history has recieved it's first action.
+	This is a good time to enable whatever widget calls the redo action
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_REDO_FIRST, -1)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView

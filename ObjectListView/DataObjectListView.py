@@ -137,8 +137,10 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		#Context Menu
 		self.contextMenu = ContextMenu(self)
+		self.columnContextMenu = ContextMenu(self)
 
-		self.showContextMenu 	= kwargs.pop("showContextMenu", False)
+		self.showContextMenu 		= kwargs.pop("showContextMenu", False)
+		self.showColumnContextMenu 	= kwargs.pop("showColumnContextMenu", False)
 
 		#Groups
 		self.groups = []
@@ -160,12 +162,21 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.groupBackgroundColour 	= kwargs.pop("groupBackgroundColour", wx.Colour(159, 185, 250, 249))
 
 		#Key Events
-		self.scrollKeys 			= kwargs.pop("scrollKeys", True)
-		self.handleStandardKeys 	= kwargs.pop("handleStandardKeys", True)
+		self.key_edit 		= kwargs.pop("key_edit", True)
+		self.key_copy 		= kwargs.pop("key_copy", True)
+		self.key_undo 		= kwargs.pop("key_undo", True)
+		self.key_paste 		= kwargs.pop("key_paste", True)
+		self.key_scroll 	= kwargs.pop("key_scroll", True)
+		self.key_expand 	= kwargs.pop("key_expand", True)
+		self.key_selectAll 	= kwargs.pop("key_selectAll", True)
+
+		self.key_copyEntireRow 		= kwargs.pop("key_copyEntireRow", True)
+		self.key_pasteEntireRow 	= kwargs.pop("key_pasteEntireRow", None)
 
 		#Copy/Paste
 		self.copiedList = []
 		self.lastClicked = (None, None)
+		self._paste_ignoreSort = False
 
 		self.clipSimple 			= kwargs.pop("clipSimple", True)
 		self.clipPrefix 			= kwargs.pop("clipPrefix", "\n")
@@ -185,6 +196,13 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.pasteWrap 			= kwargs.pop("pasteWrap", True)
 		self.pasteToCell 		= kwargs.pop("pasteToCell", True)
 		self.pasteInSelection 	= kwargs.pop("pasteInSelection", False)
+
+		#Undo/Redo
+		self.undoHistory = []
+		self.redoHistory = []
+		self._undo_listenForCheckBox = True
+
+		self.undoCap 	= kwargs.pop("undoCap", 50)
 
 		#Etc
 		self.emptyListMsg 		= kwargs.pop("emptyListMsg", "This list is empty")
@@ -261,11 +279,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_EDITING_STARTED, self._RelayEditCellStarted)
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_EDITING_DONE, self._RelayEditCellFinishing)
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_VALUE_CHANGED, self._RelayEditCellFinished)
-
-
-
-
-
 
 		#FOR DEBUGGING
 		# self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_CONTEXT_MENU, self.on_expand)
@@ -1670,18 +1683,38 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			Each row will be copied into a dictionary, where each column is a key and their value
 			corresponds to the value of the cell of the column in that row. The key None contains the
 			row item itself. Each row is added to a list.
-
-			The parameter *clipGroup* controls what happens if a group is copied.
-				- *clipGroup* == None: The group will be ignored
-				- *clipGroup* == True: All items in the group will be copied
-				- *clipGroup* == False: The group will be copied
 		"""
 
-		event = self.TriggerEvent(DOLVEvent.CopyEvent, rows = modelObjects, columns = columns, returnEvent = True)
+		#Tell the world that copying will happen
+		event = self.TriggerEvent(DOLVEvent.CopyingEvent, rows = modelObjects, columns = columns, returnEvent = True)
 		if (event.IsVetoed()):
 			return
 		if ((not event.rows) or (not event.columns)):
 			return
+
+		log = []
+
+		def logRow(row):
+			nonlocal self, event, log
+
+			newEvent = self.TriggerEvent(DOLVEvent.CopyEvent, row = row, columns = [*event.columns], returnEvent = True)
+			if (newEvent.IsVetoed() or (not newEvent.columns) or (newEvent.row == None)):
+				return None, []
+
+			contents = {None: newEvent.row}
+			for column in newEvent.columns:
+				contents[column.GetIndex()] = column.GetValue(row)
+			log.append(contents)
+
+			return newEvent.row, newEvent.columns, newEvent.text
+
+		def logGroup(group, clipGroup = None):
+			nonlocal self, log
+
+			pass
+
+			# if (clipGroup != None):
+			# 	log.append({None: group})
 
 		def getSimpleText():
 			nonlocal self, event
@@ -1689,9 +1722,15 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			lines = []
 			for row in event.rows:
 				if (isinstance(row, DataListGroup)):
+					logGroup(row, clipGroup = self.clipGroup)
 					lines.append(f"\n{row.title}")
 				else:
-					lines.append(f"{self.clipColumnSpacer or ''}".join((column.GetStringValue(row) for column in event.columns)))
+					_row, columns, _text = logRow(row)
+					if (_row != None):
+						if (_text != None):
+							lines.append(_text)
+						else:
+							lines.append(f"{self.clipColumnSpacer or ''}".join((column.GetStringValue(_row) for column in columns)))
 
 			text = f"{self.clipPrefix or ''}"
 			text += f"{self.clipRowSpacer or ''}".join(lines)
@@ -1699,23 +1738,30 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			return text
 
 		def getRowText(row):
-			nonlocal self, event
+			nonlocal self
+
+			_row, columns, _text = logRow(row)
+			if (_row == None):
+				return ""
+			if (_text != None):
+				return _text
 
 			text = f"{_Munge(row, self.clipRowPrefix, returnMunger_onFail = True)}"
 
 			previousItem = None
-			for column in event.columns:
+			for column in columns:
 				if (previousItem != None):
-					text += f"{_Munge(row, self.clipColumnSpacer, extraArgs = [previousItem, column], returnMunger_onFail = True)}"
-				text += column.GetStringValue(row)
+					text += f"{_Munge(_row, self.clipColumnSpacer, extraArgs = [previousItem, column], returnMunger_onFail = True)}"
+				text += column.GetStringValue(_row)
 				previousItem = column
 
-			text += f"{_Munge(row, self.clipRowSuffix, returnMunger_onFail = True)}"
+			text += f"{_Munge(_row, self.clipRowSuffix, returnMunger_onFail = True)}"
 			return text
 
 		def getGroupText(group, clipGroup):
 			nonlocal self
 
+			logGroup(group, clipGroup = clipGroup)
 			text = f"{_Munge(group, self.clipGroupPrefix, returnMunger_onFail = True)}"
 
 			if (not clipGroup):
@@ -1747,37 +1793,19 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 			return text
 
-		def generateCopiedList():
-			nonlocal self, event
-
-			lines = []
-			for row in event.rows:
-				if (not isinstance(row, DataListGroup)):
-					contents = {None: row}
-					for column in event.columns:
-						contents[column.GetIndex()] = column.GetValue(row)
-					lines.append(contents)
-				elif (self.clipGroup != None):
-					if (self.clipGroup):
-						for subRow in row.modelObjects:
-							contents = {None: subRow}
-							for column in event.columns:
-								contents[column.GetIndex()] = column.GetValue(subRow)
-							lines.append(contents)
-					else:
-						lines.append(row)
-			return lines
-
 		##########################################################
 
+		self.clipSimple = True #TO DO: Finish non-simple version
+
 		#Make a text version of the values
-		self.copiedList = generateCopiedList()
-		if (self.clipSimple):
+		lines = []
+		if (event.text != None):
+			text = event.text
+		elif (self.clipSimple):
 			text = getSimpleText()
 		else:
 			text = f"{_Munge(event.rows, self.clipPrefix, returnMunger_onFail = True)}"
 
-			lines = []
 			for row in event.rows:
 				if (not isinstance(row, DataListGroup)):
 					lines.append((row, getRowText(row)))
@@ -1788,12 +1816,17 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			text += joinLines(lines)
 			text += f"{_Munge(event.rows, self.clipSuffix, returnMunger_onFail = True)}"
 
+		#Tell the world that copying is done
+		event = self.TriggerEvent(DOLVEvent.CopiedEvent, log = log, text = text, rows = event.rows, columns = event.columns, returnEvent = True)
+		self.copiedList = event.log or []
+		_text = event.text or ""
+
 		#Place text on clipboard
 		clipboard = wx.TextDataObject()
-		clipboard.SetText(text)
+		clipboard.SetText(_text)
 
 		if (wx.TheClipboard.Open()):
-			if (wx.TheClipboard.SetData(clipboard) and _Munge(text, self.clipKeepAfterClose, returnMunger_onFail = True)):
+			if (wx.TheClipboard.SetData(clipboard) and _Munge(_text, self.clipKeepAfterClose, returnMunger_onFail = True)):
 				wx.TheClipboard.Flush()
 			wx.TheClipboard.Close()
 		else:
@@ -1818,7 +1851,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		self.PasteObjectsFromClipboard(list(self.YieldSelected()), entireRow = entireRow)
 
-	def PasteObjectsFromClipboard(self, modelObjects, entireRow = True):
+	def PasteObjectsFromClipboard(self, modelObjects, entireRow = True, track = True, resortNow = True):
 		"""
 		Paste what was copied into the selected row(s).
 
@@ -1838,16 +1871,17 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		is not formatted for the columns.
 			- If *pasteToCell* == True: Paste the value to the cell last clicked
 			- If *pasteToCell* == False: Paste the value to the primary column
-
 		"""
 
-		event = self.TriggerEvent(DOLVEvent.PasteEvent, rows = modelObjects, columnClicked = self.lastClicked[1], copiedList = [*self.copiedList], returnEvent = True)
+		event = self.TriggerEvent(DOLVEvent.PastingEvent, rows = modelObjects, column = self.lastClicked[1], log = [*self.copiedList], returnEvent = True)
 		if (event.IsVetoed()):
 			return
 		if (not event.rows):
 			return
 
-		columnClicked = self.GetColumn(event.columnClicked)
+		appliedLog = {}
+		log = event.log or []
+		columnClicked = self.GetColumn(event.column)
 
 		def getClipboardText():
 			clipboard = wx.TextDataObject()
@@ -1860,7 +1894,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			return clipboard.GetText()
 
 		def formatLines(lines):
-			nonlocal self
+			nonlocal self, event
 
 			if (not self.pasteWrap):
 				return
@@ -1894,7 +1928,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				yield row
 
 		def pasteSimple(text):
-			nonlocal self, event
+			nonlocal self
 
 			_text = text.lstrip(f"{self.clipPrefix or ''}").rstrip(f"{self.clipSuffix or ''}")
 			if (not self.clipRowSpacer):
@@ -1949,21 +1983,44 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			tryValue(row, columnClicked, value)
 
 		def tryValue(row, column, value):
-			if (column.renderer.type in ["bmp", "multi_bmp", "button"]):
-				return
-			if (column.isInternal):
-				return
-
-			_row = self.model.ObjectToItem(row)
-			_column = column.GetIndex()
-			oldValue = self.model.GetValue(_row, _column, raw = True)
-
+			self._paste_ignoreSort = True
+			self._undo_listenForCheckBox = False
 			try:
-				column.SetValue(row, value)
-				self.model.ValueChanged(_row, _column)
-				self.model.GetValue(_row, _column)
-			except:
-				self.model.ChangeValue(oldValue, _row, _column)
+				event = self.TriggerEvent(DOLVEvent.PasteEvent, row = row, column = column, value = value, editCanceled = False, returnEvent = True)
+				if (event.IsVetoed()):
+					return
+				if ((event.row == None) or (event.column == None)):
+					return
+
+				_row = self.model.ObjectToItem(event.row)
+				_column = event.column.GetIndex()
+				if (event.wasHandled):
+					self.model.ValueChanged(_row, _column)
+					return
+
+				if (event.column.renderer.type in ["bmp", "multi_bmp", "button"]):
+					return
+				if (event.column.isInternal):
+					return
+
+				oldValue = self.model.GetValue(_row, _column, raw = True)
+
+				try:
+					self.model.ChangeValue(event.value, _row, _column)
+					self.model.GetValue(_row, _column)
+				except Exception as error:
+					print(error)
+					self.model.ChangeValue(oldValue, _row, _column)
+				else:
+					logApplication(event.row, event.column, oldValue, event.value)
+			finally:
+				self._paste_ignoreSort = False
+				self._undo_listenForCheckBox = True
+
+		def logApplication(row, column, oldValue, value):
+			if (row not in appliedLog):
+				appliedLog[row] = []
+			appliedLog[row].append([column.GetIndex(), oldValue, value])
 
 		def pasteList(copiedList):
 			nonlocal self, entireRow, columnClicked
@@ -1978,7 +2035,10 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 				if ((not entireRow) and (columnClicked != None)):
 					index = columnClicked.GetIndex()
-					tryValue(row, self.GetColumn(index), line[index])
+					if (index in line):
+						tryValue(row, columnClicked, line[index])
+					elif (columnClicked.valueGetter in line):
+						tryValue(row, columnClicked, line[columnClicked.valueGetter])
 					continue
 
 				for index, value in line.items():
@@ -1988,12 +2048,93 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		#########################################################
 
-		if (event.copiedList):
-			return pasteList(event.copiedList)
+		try:
+			if (log):
+				return pasteList(log)
 
-		text = getClipboardText()
-		if (text and self.clipSimple):
-			return pasteSimple(text)
+			text = getClipboardText()
+			if (text and self.clipSimple):
+				return pasteSimple(text)
+		finally:
+			if (resortNow and appliedLog):
+				self.model.Resort()
+			if (track):
+				self._TrackPaste(appliedLog)
+
+	#-------------------------------------------------------------------------
+	# Undo / Redo
+
+	def _TrackAction(self, action):
+		"""
+		Remembers what was done, and what can be done to undo it.
+		"""
+
+		if (self.redoHistory):
+			self.redoHistory = []
+			self.TriggerEvent(DOLVEvent.RedoEmptyEvent)
+		
+		if (not self.undoHistory):
+			self.TriggerEvent(DOLVEvent.UndoFirstEvent)
+		elif (len(self.undoHistory) >= self.undoCap):
+			del self.undoHistory[0]
+
+		self.undoHistory.append(action)
+
+	def _TrackEdit(self, row, column, oldValue, newValue):
+		action = UndoEdit(self, row, column, oldValue, newValue)
+		self._TrackAction(action)
+
+	def _TrackPaste(self, log):
+		action = UndoPaste(self, log)
+		self._TrackAction(action)
+
+	def Undo(self):
+		"""
+		Undoes the last action in the undo history.
+		"""
+
+		self._undo_listenForCheckBox = False
+		try:
+			if (not self.undoHistory):
+				return
+
+			action = self.undoHistory.pop()
+			if (not action.undo()):
+				self.undoHistory.append(action)
+				return
+
+			if (not self.undoHistory):
+				self.TriggerEvent(DOLVEvent.UndoEmptyEvent)
+			if (not self.redoHistory):
+				self.TriggerEvent(DOLVEvent.RedoFirstEvent)
+
+			self.redoHistory.append(action)
+		finally:
+			self._undo_listenForCheckBox = True
+
+	def Redo(self):
+		"""
+		Redoes the last action in the redo history.
+		"""
+
+		self._undo_listenForCheckBox = False
+		try:
+			if (not self.redoHistory):
+				return
+
+			action = self.redoHistory.pop()
+			if (not action.redo()):
+				self.redoHistory.append(action)
+				return
+
+			if (not self.redoHistory):
+				self.TriggerEvent(DOLVEvent.RedoEmptyEvent)
+			if (not self.undoHistory):
+				self.TriggerEvent(DOLVEvent.UndoFirstEvent)
+
+			self.undoHistory.append(action)
+		finally:
+			self._undo_listenForCheckBox = True
 
 	#-------------------------------------------------------------------------
 	# Event handling
@@ -2003,94 +2144,116 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		key = event.GetUnicodeKey()
 		if (key == wx.WXK_NONE):
 			key = event.GetKeyCode()
-
-		if (self.scrollKeys):
+		
+		if (self.key_scroll):
 			if (key == wx.WXK_UP):
 				self.SelectPrevious()
 				return
 			if (key == wx.WXK_DOWN):
 				self.SelectNext()
 				return
-		if (self.handleStandardKeys):
+		if (self.key_expand):
 			if (key == wx.WXK_LEFT):
 				self.CollapseAll(self.GetSelectedGroups())
 				return
 			if (key == wx.WXK_RIGHT):
 				self.ExpandAll(self.GetSelectedGroups())
 				return
+		
+		if (self.key_copy):
 			if ((key == wx.WXK_CONTROL_C)):
-				self.CopySelectionToClipboard(entireRow = event.ShiftDown())
+				if (self.key_copyEntireRow != None):
+					self.CopySelectionToClipboard(entireRow = self.key_copyEntireRow)
+				else:
+					self.CopySelectionToClipboard(entireRow = event.ShiftDown())
 				return
+		if (self.key_paste):
 			if ((key == wx.WXK_CONTROL_V)):
-				self.PasteClipboardToSelection(entireRow = event.ShiftDown())
+				if (self.key_pasteEntireRow != None):
+					self.PasteClipboardToSelection(entireRow = self.key_pasteEntireRow)
+				else:
+					self.PasteClipboardToSelection(entireRow = event.ShiftDown())
 				return
+		if (self.key_selectAll):
 			if (key == wx.WXK_CONTROL_A):
 				self.SelectAll(override_singleSelect = False)
 				return
 			if (key == wx.WXK_ESCAPE):
 				self.UnselectAll()
 				return
+		if (self.key_undo):
+			if (key == wx.WXK_CONTROL_Z):
+				if (event.ShiftDown()):
+					self.Redo()
+				else:
+					self.Undo()
+				return
+			if (key == wx.WXK_CONTROL_Y):
+				self.Redo()
+				return
+		
+		if (self.key_edit):
 			if (key in [wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER]):
 				self._PossibleStartCellEdit(self.GetCurrentObject(), self.GetPrimaryColumn())
 				return
 
 		event.Skip()
 
-	def _HandleTypingEvent(self, event):
-		"""
-		"""
-		if self.GetItemCount() == 0 or self.GetColumnCount() == 0:
-			return False
+	# def _HandleTypingEvent(self, event):
+	# 	"""
+	# 	"""
+	# 	if self.GetItemCount() == 0 or self.GetColumnCount() == 0:
+	# 		return False
 
-		if event.GetModifiers() != 0 and event.GetModifiers() != wx.MOD_SHIFT:
-			return False
+	# 	if event.GetModifiers() != 0 and event.GetModifiers() != wx.MOD_SHIFT:
+	# 		return False
 
-		if event.GetKeyCode() > wx.WXK_START:
-			return False
+	# 	if event.GetKeyCode() > wx.WXK_START:
+	# 		return False
 
-		if event.GetKeyCode() in (wx.WXK_BACK, wx.WXK_DELETE):
-			self.searchPrefix = u""
-			return True
+	# 	if event.GetKeyCode() in (wx.WXK_BACK, wx.WXK_DELETE):
+	# 		self.searchPrefix = u""
+	# 		return True
 
-		# On which column are we going to compare values? If we should search on the
-		# sorted column, and there is a sorted column and it is searchable, we use that
-		# one, otherwise we fallback to the primary column
-		if self.typingSearchesSortColumn and self.GetSortColumn(
-		) and self.GetSortColumn().isSearchable:
-			searchColumn = self.GetSortColumn()
-		else:
-			searchColumn = self.GetPrimaryColumn()
+	# 	# On which column are we going to compare values? If we should search on the
+	# 	# sorted column, and there is a sorted column and it is searchable, we use that
+	# 	# one, otherwise we fallback to the primary column
+	# 	if self.typingSearchesSortColumn and self.GetSortColumn(
+	# 	) and self.GetSortColumn().isSearchable:
+	# 		searchColumn = self.GetSortColumn()
+	# 	else:
+	# 		searchColumn = self.GetPrimaryColumn()
 
-		# On Linux, GetUnicodeKey() always returns 0 -- on my 2.8.7.1
-		# (gtk2-unicode)
-		uniKey = event.UnicodeKey
-		if uniKey == 0:
-			uniChar = six.unichr(event.KeyCode)
-		else:
-			# on some versions of wxPython UnicodeKey returns the character
-			# on others it is an integer
-			if isinstance(uniKey, int):
-				uniChar = six.unichr(uniKey)
-			else:
-				uniChar = uniKey
-		if not self._IsPrintable(uniChar):
-			return False
+	# 	# On Linux, GetUnicodeKey() always returns 0 -- on my 2.8.7.1
+	# 	# (gtk2-unicode)
+	# 	uniKey = event.UnicodeKey
+	# 	if uniKey == 0:
+	# 		uniChar = six.unichr(event.KeyCode)
+	# 	else:
+	# 		# on some versions of wxPython UnicodeKey returns the character
+	# 		# on others it is an integer
+	# 		if isinstance(uniKey, int):
+	# 			uniChar = six.unichr(uniKey)
+	# 		else:
+	# 			uniChar = uniKey
+	# 	if not self._IsPrintable(uniChar):
+	# 		return False
 
-		# On Linux, event.GetTimestamp() isn't reliable so use time.time()
-		# instead
-		timeNow = time.time()
-		if (timeNow - self.whenLastTypingEvent) > self.SEARCH_KEYSTROKE_DELAY:
-			self.searchPrefix = uniChar
-		else:
-			self.searchPrefix += uniChar
-		self.whenLastTypingEvent = timeNow
+	# 	# On Linux, event.GetTimestamp() isn't reliable so use time.time()
+	# 	# instead
+	# 	timeNow = time.time()
+	# 	if (timeNow - self.whenLastTypingEvent) > self.SEARCH_KEYSTROKE_DELAY:
+	# 		self.searchPrefix = uniChar
+	# 	else:
+	# 		self.searchPrefix += uniChar
+	# 	self.whenLastTypingEvent = timeNow
 
-		#self.__rows = 0
-		self._FindByTyping(searchColumn, self.searchPrefix)
-		# log "Considered %d rows in %2f secs" % (self.__rows, time.time() -
-		# timeNow)
+	# 	#self.__rows = 0
+	# 	self._FindByTyping(searchColumn, self.searchPrefix)
+	# 	# log "Considered %d rows in %2f secs" % (self.__rows, time.time() -
+	# 	# timeNow)
 
-		return True
+	# 	return True
 
 	def _HandleColumnClick(self, event):
 		"""
@@ -2177,8 +2340,11 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		except TypeError:
 			kwargs["row"] = None
 		kwargs["position"] = relayEvent.GetPosition()
-		kwargs["value"] = relayEvent.GetValue()
 		kwargs["editCanceled"] = relayEvent.IsEditCancelled()
+
+		kwargs["value"] = relayEvent.GetValue()
+		if (isinstance(kwargs["value"], wx.dataview.DataViewIconText)):
+			kwargs["value"] = kwargs["value"].GetText()
 
 		return kwargs
 
@@ -2200,18 +2366,23 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		return True
 
 	def _RelayEvent(self, eventFrom, eventTo):
-		answer = self.TriggerEvent(eventTo, **self._getRelayInfo(eventFrom))
+		info = self._getRelayInfo(eventFrom)
+		answer = self.TriggerEvent(eventTo, **info)
 		if (answer):
 			eventFrom.Skip()
 		elif (answer != None):
 			eventFrom.Veto()
+		return answer, info
 
 	def _RelaySelectionChanged(self, relayEvent):
 		model = relayEvent.GetModel()
 
 		#Record location
 		_row, _column = self.HitTest(self.ScreenToClient(wx.GetMousePosition()))
-		self.lastClicked = (model.ItemToObject(_row), self.GetColumn(_column))
+		if (_row.IsOk()):
+			self.lastClicked = (model.ItemToObject(_row), self.GetColumn(_column))
+		else:
+			self.lastClicked = (None, self.GetColumn(_column))
 
 		#Do not fire this event if that row is already selecetd
 		try:
@@ -2254,6 +2425,16 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self._RelayEvent(relayEvent, DOLVEvent.ColumnHeaderLeftClickEvent)
 
 	def _RelayColumnHeaderRightClick(self, relayEvent):
+		if (self.showColumnContextMenu):
+			rowInfo = self._getRelayInfo(relayEvent)
+
+			#Check if the user clicked on empty space instead of on an item
+			if (rowInfo["column"] != None):
+				self.columnContextMenu.SetColumn(rowInfo["column"])
+				if (self.columnContextMenu.Show()):
+					relayEvent.Skip()
+					return
+
 		self._RelayEvent(relayEvent, DOLVEvent.ColumnHeaderRightClickEvent)
 
 	def _RelaySorted(self, relayEvent):
@@ -2285,10 +2466,21 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self._RelayEvent(relayEvent, DOLVEvent.EditCellStartedEvent)
 
 	def _RelayEditCellFinishing(self, relayEvent):
-		self._RelayEvent(relayEvent, DOLVEvent.EditCellFinishingEvent)
+		answer, info = self._RelayEvent(relayEvent, DOLVEvent.EditCellFinishingEvent)
+		
+		column = info["column"]
+		if ((column != None) and (answer != False)):
+			row = info["row"]
+			self._TrackEdit(row, column, column.GetValue(row), info["value"])
 
 	def _RelayEditCellFinished(self, relayEvent):
-		self._RelayEvent(relayEvent, DOLVEvent.EditCellFinishedEvent)
+		answer, info = self._RelayEvent(relayEvent, DOLVEvent.EditCellFinishedEvent)
+
+		column = info["column"]
+		if (self._undo_listenForCheckBox and (column != None) and (answer != False) and (isinstance(column.renderer, (wx.dataview.DataViewToggleRenderer, Renderer_CheckBox)))):
+			row = info["row"]
+			value = column.GetValue(row)
+			self._TrackEdit(row, column, not value, value)
 
 class DataListGroup(object):
 	"""
@@ -2643,7 +2835,7 @@ class DataColumnDefn(object):
 		"""
 		Set this columns aspect of the given modelObject to have the given value.
 		"""
-		_log("@DataColumnDefn.SetValue", modelObject, value)
+		# _log("@DataColumnDefn.SetValue", modelObject, value)
 		if (self.valueSetter is None):
 			return _SetValueUsingMunger(modelObject, value, self.valueGetter)
 		else:
@@ -2656,7 +2848,7 @@ class DataColumnDefn(object):
 		"""
 		Calculate the given width bounded by the (optional) minimum and maximum column widths
 		"""
-		_log("@DataColumnDefn.CalcBoundedWidth", width)
+		# _log("@DataColumnDefn.CalcBoundedWidth", width)
 		# Values of < 0 have special meanings, so just return them
 		if width < 0:
 			return width
@@ -2705,6 +2897,8 @@ class ContextMenu(object):
 		super().__init__()
 
 		self.olv = olv
+		self.row = None
+		self.column = None
 		self.contents = []    #[id]
 		self.idCatalogue = {} #{id: text}
 		self.exclusive_x = {} #{id: [row]}
@@ -2844,6 +3038,75 @@ class ContextMenu(object):
 		self.olv.PopupMenu(menu)
 		menu.Destroy()
 		return True
+
+class UndoEdit():
+	"""
+	This class tracks an edit action that was done.
+	It provides undo and redo methods.
+	
+	Modified code from: https://wiki.wxpython.org/UndoRedoFramework
+	"""
+
+	def __init__(self, olv, modelObject, column, oldValue, newValue):
+		self.olv = olv
+		self.column = column
+		self.oldValue = oldValue
+		self.newValue = newValue
+		self.modelObject = modelObject
+
+	def undo(self, undo = True):
+		_row = self.olv.model.ObjectToItem(self.modelObject)
+		if (not _row.IsOk()):
+			print(f"{_row.__repr__()} is not on the table anymore.")
+			return False
+
+		if (undo):
+			value = self.oldValue
+		else:
+			value = self.newValue
+
+		return self.olv.model.ChangeValue(value, _row, self.column.GetIndex())
+
+	def redo(self, redo = True):
+		return self.undo(undo = not redo)
+
+class UndoPaste():
+	"""
+	This class tracks a paste action that was done.
+	It provides undo and redo methods.
+	
+	Modified code from: https://wiki.wxpython.org/UndoRedoFramework
+	"""
+
+	def __init__(self, olv, log):
+		self.olv = olv
+		self.log = log
+
+	def undo(self, undo = True):
+		self.olv._paste_ignoreSort = True
+		try:
+			success = True
+			for row, changes in self.log.items():
+				_row = self.olv.model.ObjectToItem(row)
+				if (not _row.IsOk()):
+					print(f"{_row.__repr__()} is not on the table anymore.")
+					success = False
+
+				if (undo):
+					for index, value, _ in changes:
+						if (not self.olv.model.ChangeValue(value, _row, index)):
+							success = False
+				else:
+					for index, _, value in changes:
+						if (not self.olv.model.ChangeValue(value, _row, index)):
+							success = False
+			return success
+		finally:
+			self.olv._paste_ignoreSort = False
+			self.olv.model.Resort()
+
+	def redo(self, redo = True):
+		return self.undo(undo = not redo)
 
 #Utility Functions
 def _log(*data):
@@ -3456,10 +3719,13 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		if (raw):
 			return value
 
-		# print("@model.GetValue", defn.renderer, node.__repr__(), defn.valueGetter, value, defn.stringConverter)
+		# _log("@model.GetValue", defn.renderer, node.__repr__(), defn.valueGetter, value, defn.stringConverter)
 
-		if (isinstance(defn.renderer, (Renderer_Text, wx.dataview.DataViewTextRenderer,
-			Renderer_Choice, wx.dataview.DataViewChoiceRenderer))):
+		if (isinstance(defn.renderer, (Renderer_Text))):
+			#Account for formatter
+			return (value, _StringToValue(value, defn.stringConverter))
+		
+		if (isinstance(defn.renderer, (Renderer_Choice, wx.dataview.DataViewTextRenderer, wx.dataview.DataViewChoiceRenderer))):
 			return _StringToValue(value, defn.stringConverter)
 
 		elif (isinstance(defn.renderer, (Renderer_Spin, wx.dataview.DataViewSpinRenderer,
@@ -3482,7 +3748,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			if (isinstance(image, (list, tuple, set, types.GeneratorType))):
 				return image
 			else:
-				return [image] * value
+				return [image] * int(value)
 
 		elif (isinstance(defn.renderer, Renderer_Button)):
 			return [node, defn, value]
@@ -3507,10 +3773,10 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		except AttributeError:
 			raise AttributeError(f"There is no column {column}")
 
-		if (isinstance(defn.renderer, (wx.dataview.DataViewIconTextRenderer, Renderer_Icon))):
+		if (isinstance(defn.renderer, (wx.dataview.DataViewIconTextRenderer, Renderer_Icon)) and (isinstance(value, wx.dataview.DataViewIconText))):
 			value = value.GetText()
 
-		# print("@model.SetValue", value, node.__repr__(), column, defn.valueSetter, defn.valueGetter)
+		# _log("@model.SetValue", value, node.__repr__(), column, defn.valueSetter, defn.valueGetter)
 		if (defn.valueSetter is None):
 			_SetValueUsingMunger(node, value, defn.valueGetter, extraArgs = [defn])
 		else:
@@ -3597,11 +3863,16 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		_log("@model.Cleared")
 		return super().Cleared()
 
-	def ChangeValue(self, variant, item, column):
+	def ChangeValue(self, value, item, column):
 		#Change the value of the given item and update the control to reflect it.
-		#This function simply calls SetValue and, if it succeeded, ValueChanged .
-		_log("@model.ChangeValue", variant, item, column)
-		return super().ChangeValue(variant, item, column)
+		#This function simply calls SetValue and, if it succeeded, ValueChanged.
+		_log("@model.ChangeValue", value, item, column)
+
+		#super().ChangeValue does not accept a value of None, so the logic is redone here
+		if (self.SetValue(value, item, column)):
+			return self.ValueChanged(item, column)
+
+		# return super().ChangeValue(value, item, column)
 
 	def ValueChanged(self, item, column):
 		# Call this to inform this model that a value in the model has been changed.
@@ -3679,6 +3950,9 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def Resort(self):
 		# Call this to initiate a resort after the sort function has been changed.
 		_log("@model.Resort")
+
+		if (self.olv._paste_ignoreSort):
+			return
 
 		#Fire a SortEvent that can be catched by an OLV-using developer using Bind() for this event
 		column = self.olv.GetSortingColumn()
@@ -3884,7 +4158,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def SetValue_both(self, value):
-		# print("@Renderer_Button.SetValue_both", value)
+		# _log("@Renderer_Button.SetValue_both", value)
 		self._node = value[0]
 		self._column = value[1]
 		self._text = value[2][0]
@@ -3897,7 +4171,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def SetValue_function(self, value):
-		# print("@Renderer_Button.SetValue_function", value)
+		# _log("@Renderer_Button.SetValue_function", value)
 		self._node = value[0]
 		self._column = value[1]
 		self._applyFunction(value[2])
@@ -3910,7 +4184,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def SetValue_text(self, value):
-		# print("@Renderer_Button.SetValue_text", value)
+		# _log("@Renderer_Button.SetValue_text", value)
 		self._node = value[0]
 		self._column = value[1]
 		self._applyFunction(_Munge(self._node, self.function, returnMunger_onFail = True))
@@ -3923,7 +4197,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def SetValue(self, value):
-		# print("@Renderer_Button.SetValue", value, self.function, self.text)
+		# _log("@Renderer_Button.SetValue", value, self.function, self.text)
 		self._node = value[0]
 		self._column = value[1]
 		self._applyFunction(_Munge(self._node, self.function, returnMunger_onFail = True))
@@ -3951,7 +4225,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		return (-1, -1)
 
 	def Render(self, rectangle, dc, state):
-		# print("@Renderer_Button.Render", rectangle, dc, state, self._text, self._function)
+		# _log("@Renderer_Button.Render", rectangle, dc, state, self._text, self._function)
 
 		isSelected = state == wx.dataview.DATAVIEW_CELL_SELECTED
 		useNativeRenderer = _Munge(self._node, self.useNativeRenderer, returnMunger_onFail = True)
@@ -4349,10 +4623,15 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 				if (maximum is None):
 					maximum = 100
 
+				try:
+					_value = int(value)
+				except TypeError:
+					_value = 0
+
 				if (editor.lower() == "slider"):
-					ctrl = wx.Slider(parent, value = int(value), minValue = int(minimum), maxValue = int(maximum), pos = labelRect.Position, size = labelRect.Size)
+					ctrl = wx.Slider(parent, value = _value, minValue = int(minimum), maxValue = int(maximum), pos = labelRect.Position, size = labelRect.Size)
 				else:
-					ctrl = wx.SpinCtrl(parent, pos = labelRect.Position, size = labelRect.Size, min = int(minimum), max = int(maximum), initial = int(value))
+					ctrl = wx.SpinCtrl(parent, pos = labelRect.Position, size = labelRect.Size, min = int(minimum), max = int(maximum), initial = _value)
 		except:
 			ctrl = editor
 
@@ -4423,18 +4702,21 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 
 class Renderer_Text(wx.dataview.DataViewTextRenderer):
 	"""
+	If *editRaw* == True: Edit the un-formatted value
+	If *editRaw* == False: Edit the formatted value
 	"""
 
-	def __init__(self, editor = None, password = False, ellipsize = True, **kwargs):
+	def __init__(self, editor = None, password = False, ellipsize = True, editRaw = True, **kwargs):
 		_log("@Renderer_Text.__init__", kwargs)
 
 		wx.dataview.DataViewTextRenderer.__init__(self, **kwargs)
 		self.type = "text"
 		self.buildingKwargs = {**kwargs, "password": password}
 
+		self.password = password
 		self.SetEllipsize(ellipsize)
 		self.SetEditor(editor)
-		self.password = password
+		self.SetEditRaw(editRaw)
 
 	def Clone(self, **kwargs):
 		#Any keywords in kwargs will override keywords in buildingKwargs
@@ -4452,6 +4734,14 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		self.editor = editor
 		self.buildingKwargs["editor"] = editor
 
+	def SetEditRaw(self, editRaw = None):
+		self.editRaw = editRaw
+		self.buildingKwargs["editRaw"] = editRaw
+
+	def SetValue(self, value):
+		# _log("@Renderer_Text.SetValue", value)
+		return super().SetValue(value[1])
+
 	def HasEditorCtrl(self):
 		# _log("@Renderer_Text.HasEditorCtrl")
 		return True
@@ -4468,7 +4758,12 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		else:
 			style = "0"
 
-		ctrl = wx.TextCtrl(parent, value = str(value), pos = labelRect.Position, size = labelRect.Size, style = eval(style, {'__builtins__': None, "wx": wx}, {}))
+		if (self.editRaw):
+			_value = str(value[0])
+		else:
+			_value = str(value[1])
+
+		ctrl = wx.TextCtrl(parent, value = _value, pos = labelRect.Position, size = labelRect.Size, style = eval(style, {'__builtins__': None, "wx": wx}, {}))
 		ctrl.SetInsertionPointEnd()
 		ctrl.SelectAll()
 		return ctrl
