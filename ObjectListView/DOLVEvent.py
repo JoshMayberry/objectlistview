@@ -66,10 +66,13 @@ def _EventMaker():
 (olv_EVT_DATA_PASTING, EVT_DATA_PASTING) = _EventMaker()
 (olv_EVT_DATA_PASTE, EVT_DATA_PASTE) = _EventMaker()
 
-(olv_EVT_DATA_UNDO_EMPTY, EVT_DATA_UNDO_EMPTY) = _EventMaker()
-(olv_EVT_DATA_REDO_EMPTY, EVT_DATA_REDO_EMPTY) = _EventMaker()
+(olv_EVT_DATA_UNDO, EVT_DATA_UNDO) = _EventMaker()
+(olv_EVT_DATA_UNDO_TRACK, EVT_DATA_UNDO_TRACK) = _EventMaker()
 (olv_EVT_DATA_UNDO_FIRST, EVT_DATA_UNDO_FIRST) = _EventMaker()
+(olv_EVT_DATA_UNDO_EMPTY, EVT_DATA_UNDO_EMPTY) = _EventMaker()
+(olv_EVT_DATA_REDO, EVT_DATA_REDO) = _EventMaker()
 (olv_EVT_DATA_REDO_FIRST, EVT_DATA_REDO_FIRST) = _EventMaker()
+(olv_EVT_DATA_REDO_EMPTY, EVT_DATA_REDO_EMPTY) = _EventMaker()
 
 
 #======================================================================
@@ -561,6 +564,8 @@ class UndoEmptyEvent(wx.PyCommandEvent):
 		self.SetEventObject(objectListView)
 		self.objectListView = objectListView
 
+		self.type = kwargs.pop("type", None)
+
 class RedoEmptyEvent(wx.PyCommandEvent):
 	"""
 	Notifies the user that the redo history is empty.
@@ -571,6 +576,8 @@ class RedoEmptyEvent(wx.PyCommandEvent):
 		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_REDO_EMPTY, -1)
 		self.SetEventObject(objectListView)
 		self.objectListView = objectListView
+
+		self.type = kwargs.pop("type", None)
 
 class UndoFirstEvent(wx.PyCommandEvent):
 	"""
@@ -583,6 +590,8 @@ class UndoFirstEvent(wx.PyCommandEvent):
 		self.SetEventObject(objectListView)
 		self.objectListView = objectListView
 
+		self.type = kwargs.pop("type", None)
+
 class RedoFirstEvent(wx.PyCommandEvent):
 	"""
 	Notifies the user that the redo history has recieved it's first action.
@@ -593,3 +602,82 @@ class RedoFirstEvent(wx.PyCommandEvent):
 		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_REDO_FIRST, -1)
 		self.SetEventObject(objectListView)
 		self.objectListView = objectListView
+
+		self.type = kwargs.pop("type", None)
+
+class UndoEvent(VetoableEvent):
+	"""
+	An action is going to be undone.
+
+	Veto() will not allow the item to be undone.
+
+	Handled() will cause the program to consider the action undone, and will
+	remove the action from the undo history and placed in the redo history.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		VetoableEvent.__init__(self, olv_EVT_DATA_UNDO)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.row = kwargs.pop("row", [])
+		self.type = kwargs.pop("type", None)
+		self.value = kwargs.pop("value", None)
+		self.column = kwargs.pop("column", [])
+		self.editCanceled = kwargs.pop("editCanceled", None)
+		self.wasHandled = False
+
+	def Handled(self, wasHandled = True):
+		"""
+		Indicate that the event handler has changed the value.
+		The OLV will handle other tasks like removing the action from the undo history
+		and placing it in the redo history.
+		"""
+		self.wasHandled = wasHandled
+
+class RedoEvent(VetoableEvent):
+	"""
+	An action is going to be redone.
+
+	Veto() will not allow the item to be redone.
+
+	Handled() will cause the program to consider the action redone, and will
+	remove the action from the redo history and placed in the undo history.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		VetoableEvent.__init__(self, olv_EVT_DATA_REDO)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.row = kwargs.pop("row", [])
+		self.type = kwargs.pop("type", None)
+		self.value = kwargs.pop("value", None)
+		self.column = kwargs.pop("column", [])
+		self.editCanceled = kwargs.pop("editCanceled", None)
+		self.wasHandled = False
+
+	def Handled(self, wasHandled = True):
+		"""
+		Indicate that the event handler has changed the value.
+		The OLV will handle other tasks like removing the action from the redo history
+		and placing it in the undo history.
+		"""
+		self.wasHandled = wasHandled
+
+class UndoTrackEvent(VetoableEvent):
+	"""
+	An action is going to be tracked in the undo history
+
+	Veto() will not allow the item to be tracked.
+
+	The user can modify the tracked event here if they need to.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		VetoableEvent.__init__(self, olv_EVT_DATA_UNDO_TRACK)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.type = kwargs.pop("type", None)
+		self.action = kwargs.pop("action", None)

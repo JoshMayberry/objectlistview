@@ -319,13 +319,13 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	def SetColumns(self, columns, repopulate = True):
 		_log("@DataObjectListView.SetColumns", columns, repopulate)
 		sortCol = self.GetSortColumn()
-		self.ClearAll()
 		self.ClearColumns()
+		self.ClearAll()
 
 		self.columns = {}
 		
 		if (self.hideFirstIndent and (not self.showGroups)):
-			x = self.AddColumnDefn(DataColumnDefn(title = "", width = 0))
+			x = self.AddColumnDefn(DataColumnDefn(title = "", width = 20))
 			x.isInternal = True
 			# self.SetExpanderColumn(x.column)
 
@@ -1986,6 +1986,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			self._paste_ignoreSort = True
 			self._undo_listenForCheckBox = False
 			try:
+				oldValue = column.GetValue(row)
 				event = self.TriggerEvent(DOLVEvent.PasteEvent, row = row, column = column, value = value, editCanceled = False, returnEvent = True)
 				if (event.IsVetoed()):
 					return
@@ -1996,14 +1997,13 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				_column = event.column.GetIndex()
 				if (event.wasHandled):
 					self.model.ValueChanged(_row, _column)
+					logApplication(event.row, event.column, oldValue, event.value)
 					return
 
 				if (event.column.renderer.type in ["bmp", "multi_bmp", "button"]):
 					return
 				if (event.column.isInternal):
 					return
-
-				oldValue = self.model.GetValue(_row, _column, raw = True)
 
 				try:
 					self.model.ChangeValue(event.value, _row, _column)
@@ -2020,7 +2020,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		def logApplication(row, column, oldValue, value):
 			if (row not in appliedLog):
 				appliedLog[row] = []
-			appliedLog[row].append([column.GetIndex(), oldValue, value])
+			appliedLog[row].append([column, oldValue, value])
 
 		def pasteList(copiedList):
 			nonlocal self, entireRow, columnClicked
@@ -2069,6 +2069,10 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Remembers what was done, and what can be done to undo it.
 		"""
 
+		event = self.TriggerEvent(DOLVEvent.UndoTrackEvent, action = action, type = action.GetType(), returnEvent = True)
+		if (event.IsVetoed() or (event.action == None)):
+			return
+
 		if (self.redoHistory):
 			self.redoHistory = []
 			self.TriggerEvent(DOLVEvent.RedoEmptyEvent)
@@ -2078,7 +2082,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		elif (len(self.undoHistory) >= self.undoCap):
 			del self.undoHistory[0]
 
-		self.undoHistory.append(action)
+		self.undoHistory.append(event.action)
 
 	def _TrackEdit(self, row, column, oldValue, newValue):
 		action = UndoEdit(self, row, column, oldValue, newValue)
@@ -2087,6 +2091,34 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	def _TrackPaste(self, log):
 		action = UndoPaste(self, log)
 		self._TrackAction(action)
+
+	def SetUndoHistory(self, undoHistory = []):
+		"""
+		Changes the undo history, while making sure to trigger the appropriate events.
+		"""
+
+		if (not undoHistory):
+			if (self.undoHistory):
+				self.TriggerEvent(DOLVEvent.UndoEmptyEvent)
+		else:
+			if (not self.undoHistory):
+				self.TriggerEvent(DOLVEvent.UndoFirstEvent)
+
+		self.undoHistory = undoHistory or []
+
+	def SetRedoHistory(self, redoHistory = []):
+		"""
+		Changes the redo history, while making sure to trigger the appropriate events.
+		"""
+
+		if (not redoHistory):
+			if (self.redoHistory):
+				self.TriggerEvent(DOLVEvent.RedoEmptyEvent)
+		else:
+			if (not self.redoHistory):
+				self.TriggerEvent(DOLVEvent.RedoFirstEvent)
+
+		self.redoHistory = redoHistory or []
 
 	def Undo(self):
 		"""
@@ -2104,9 +2136,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				return
 
 			if (not self.undoHistory):
-				self.TriggerEvent(DOLVEvent.UndoEmptyEvent)
+				self.TriggerEvent(DOLVEvent.UndoEmptyEvent, type = action.GetType())
 			if (not self.redoHistory):
-				self.TriggerEvent(DOLVEvent.RedoFirstEvent)
+				self.TriggerEvent(DOLVEvent.RedoFirstEvent, type = action.GetType())
 
 			self.redoHistory.append(action)
 		finally:
@@ -2128,9 +2160,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				return
 
 			if (not self.redoHistory):
-				self.TriggerEvent(DOLVEvent.RedoEmptyEvent)
+				self.TriggerEvent(DOLVEvent.RedoEmptyEvent, type = action.GetType())
 			if (not self.undoHistory):
-				self.TriggerEvent(DOLVEvent.UndoFirstEvent)
+				self.TriggerEvent(DOLVEvent.UndoFirstEvent, type = action.GetType())
 
 			self.undoHistory.append(action)
 		finally:
@@ -2365,8 +2397,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			return
 		return True
 
-	def _RelayEvent(self, eventFrom, eventTo):
-		info = self._getRelayInfo(eventFrom)
+	def _RelayEvent(self, eventFrom, eventTo, info = None):
+		if (not info):
+			info = self._getRelayInfo(eventFrom)
 		answer = self.TriggerEvent(eventTo, **info)
 		if (answer):
 			eventFrom.Skip()
@@ -2466,21 +2499,31 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self._RelayEvent(relayEvent, DOLVEvent.EditCellStartedEvent)
 
 	def _RelayEditCellFinishing(self, relayEvent):
-		answer, info = self._RelayEvent(relayEvent, DOLVEvent.EditCellFinishingEvent)
-		
+		info = self._getRelayInfo(relayEvent)
 		column = info["column"]
-		if ((column != None) and (answer != False)):
+		if (column != None):
 			row = info["row"]
-			self._TrackEdit(row, column, column.GetValue(row), info["value"])
+			oldValue = column.GetValue(row)
+
+		self._RelayEvent(relayEvent, DOLVEvent.EditCellFinishingEvent, info = info)
+		
+		if ((column != None) and (relayEvent.IsAllowed())):
+			self._TrackEdit(row, column, oldValue, info["value"])
 
 	def _RelayEditCellFinished(self, relayEvent):
-		answer, info = self._RelayEvent(relayEvent, DOLVEvent.EditCellFinishedEvent)
-
+		info = self._getRelayInfo(relayEvent)
 		column = info["column"]
-		if (self._undo_listenForCheckBox and (column != None) and (answer != False) and (isinstance(column.renderer, (wx.dataview.DataViewToggleRenderer, Renderer_CheckBox)))):
+		if (column != None):
 			row = info["row"]
+			oldValue = column.GetValue(row)
+
+		self._RelayEvent(relayEvent, DOLVEvent.EditCellFinishedEvent, info = info)
+
+		if (self._undo_listenForCheckBox and (column != None) and (relayEvent.IsAllowed()) and 
+			(isinstance(column.renderer, (wx.dataview.DataViewToggleRenderer, Renderer_CheckBox)))):
+
 			value = column.GetValue(row)
-			self._TrackEdit(row, column, not value, value)
+			self._TrackEdit(row, column, oldValue, value)
 
 class DataListGroup(object):
 	"""
@@ -3054,18 +3097,37 @@ class UndoEdit():
 		self.newValue = newValue
 		self.modelObject = modelObject
 
-	def undo(self, undo = True):
-		_row = self.olv.model.ObjectToItem(self.modelObject)
-		if (not _row.IsOk()):
-			print(f"{_row.__repr__()} is not on the table anymore.")
+	def __enter__(self):
+		return self
+
+	def __exit__(self, exc_type, exc_value, traceback):
+		if (traceback != None):
 			return False
 
-		if (undo):
-			value = self.oldValue
-		else:
-			value = self.newValue
+	def GetType(self):
+		return self.__class__.__name__
 
-		return self.olv.model.ChangeValue(value, _row, self.column.GetIndex())
+	def undo(self, undo = True):
+		if (undo):
+			event = self.olv.TriggerEvent(DOLVEvent.UndoEvent, row = self.modelObject, column = self.olv.GetColumn(self.column), 
+				value = self.oldValue, type = self.GetType(), returnEvent = True)
+		else:
+			event = self.olv.TriggerEvent(DOLVEvent.RedoEvent, row = self.modelObject, column = self.olv.GetColumn(self.column), 
+				value = self.newValue, type = self.GetType(), returnEvent = True)
+		if (event.IsVetoed()):
+			return
+
+		_row = self.olv.model.ObjectToItem(event.row)
+		if (not _row.IsOk()):
+			print(f"Row {event.row.__repr__()} is not on the table anymore.")
+			return False
+		if (event.column == None):
+			print(f"Column {self.column.__repr__()} is not on the table anymore.")
+			return False
+
+		if (event.wasHandled):
+			return self.olv.model.ValueChanged(_row, event.column.GetIndex())
+		return self.olv.model.ChangeValue(event.value, _row, event.column.GetIndex())
 
 	def redo(self, redo = True):
 		return self.undo(undo = not redo)
@@ -3082,23 +3144,46 @@ class UndoPaste():
 		self.olv = olv
 		self.log = log
 
+	def __enter__(self):
+		return self
+
+	def __exit__(self, exc_type, exc_value, traceback):
+		if (traceback != None):
+			return False
+
+	def GetType(self):
+		return self.__class__.__name__
+
 	def undo(self, undo = True):
 		self.olv._paste_ignoreSort = True
 		try:
 			success = True
 			for row, changes in self.log.items():
-				_row = self.olv.model.ObjectToItem(row)
-				if (not _row.IsOk()):
-					print(f"{_row.__repr__()} is not on the table anymore.")
-					success = False
+				for column, oldValue, newValue in changes:
+					if (undo):
+						event = self.olv.TriggerEvent(DOLVEvent.UndoEvent, row = row, column = self.olv.GetColumn(column), 
+							value = oldValue, type = self.GetType(), returnEvent = True)
+					else:
+						event = self.olv.TriggerEvent(DOLVEvent.RedoEvent, row = row, column = self.olv.GetColumn(column), 
+							value = newValue, type = self.GetType(), returnEvent = True)
+					if (event.IsVetoed()):
+						continue
 
-				if (undo):
-					for index, value, _ in changes:
-						if (not self.olv.model.ChangeValue(value, _row, index)):
+					_row = self.olv.model.ObjectToItem(event.row)
+					if (not _row.IsOk()):
+						print(f"Row {row.__repr__()} is not on the table anymore.")
+						success = False
+						continue
+					if (event.column == None):
+						print(f"Column {column.__repr__()} is not on the table anymore.")
+						success = False
+						continue
+
+					if (event.wasHandled):
+						if (not self.olv.model.ValueChanged(_row, event.column.GetIndex())):
 							success = False
-				else:
-					for index, _, value in changes:
-						if (not self.olv.model.ChangeValue(value, _row, index)):
+					else:
+						if (not self.olv.model.ChangeValue(event.value, _row, event.column.GetIndex())):
 							success = False
 			return success
 		finally:
@@ -3741,7 +3826,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				icon = wx.Icon(wx.NullBitmap)
 			if (value == None):
 				value = ""
-			return wx.dataview.DataViewIconText(text = value, icon = icon)
+			return wx.dataview.DataViewIconText(text = str(value), icon = icon)
 
 		elif (isinstance(defn.renderer, Renderer_MultiImage)):
 			image = _Munge(node, defn.renderer.image, extraArgs = [defn], returnMunger_onFail = True)
