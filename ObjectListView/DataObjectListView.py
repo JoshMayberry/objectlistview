@@ -2582,42 +2582,14 @@ class DataColumnDefn(object):
 		If None: The default renderer for a wxListItem will be used.
 	"""
 
-	def __init__(
-			self,
-			title="title",
-			align="left",
-			width=-1,
-			valueGetter=None,
-			sortGetter=None,
-			imageGetter=None,
-			stringConverter=None,
-			valueSetter=None,
-			isSortable=True,
-			isEditable=True,
-			isReorderable=True,
-			isResizeable=True,
-			isHidden=False,
-			isSpaceFilling=False,
-			isSearchable=True,
-			fixedWidth=None,
-			minimumWidth=-1,
-			maximumWidth=-1,
-			cellEditorCreator=None,
-			autoCompleteCellEditor=False,
-			autoCompleteComboBoxCellEditor=False,
-			checkStateGetter=None,
-			checkStateSetter=None,
-			useBinarySearch=None,
-			headerImage=-1,
-			groupKeyGetter=None,
-			groupKeyConverter=None,
-			groupSortGetter=None,
-			useInitialLetterForGroupKey=False,
-			groupTitleSingleItem=None,
-			groupTitlePluralItems=None,
-			renderer=None,
-			rendererArgs=[],
-			rendererKwargs={}):
+	def __init__(self,title = "title", align = "left", width = -1, valueGetter = None, sortGetter = None, 
+		imageGetter = None, stringConverter = None, valueSetter = None, isSortable = True, isEditable = True, 
+		isReorderable = True, isResizeable = True, isHidden = False, isSpaceFilling = False, isSearchable = True, 
+		fixedWidth = None, minimumWidth = -1, maximumWidth = -1, cellEditorCreator = None, 
+		autoCompleteCellEditor = False, autoCompleteComboBoxCellEditor = False, checkStateGetter = None, 
+		checkStateSetter = None, useBinarySearch = None, headerImage = -1, groupKeyGetter = None, 
+		groupKeyConverter = None, groupSortGetter = None, useInitialLetterForGroupKey = False, 
+		groupTitleSingleItem = None, groupTitlePluralItems = None, renderer = None, rendererArgs = [], rendererKwargs = {}):
 		"""
 		Create a new ColumnDefn using the given attributes.
 		"""
@@ -2807,31 +2779,7 @@ class DataColumnDefn(object):
 		Return a string representation of the value for this column from the given modelObject
 		"""
 		value = self.GetValue(modelObject)
-		return self._StringToValue(value, self.stringConverter)
-
-	def _StringToValue(self, value, converter):
-		"""
-		Convert the given value to a string, using the given converter
-		"""
-		try:
-			return converter(value)
-		except TypeError:
-			pass
-
-		if (converter and isinstance(value, (datetime.datetime, datetime.date, datetime.time))):
-			return value.strftime(self.stringConverter)
-		if (converter and isinstance(value, wx.DateTime)):
-			return value.Format(self.stringConverter)
-
-		# By default, None is changed to an empty string.
-		if not converter and not value:
-			return ""
-
-		fmt = converter or "%s"
-		try:
-			return fmt % value
-		except UnicodeError:
-			return unicode(fmt) % value
+		return _StringToValue(value, self.stringConverter, extraArgs = [self])
 
 	def GetGroupKey(self, modelObject):
 		"""
@@ -2856,9 +2804,9 @@ class DataColumnDefn(object):
 		# If there is no group key getter, we must have the normal aspect value. So if
 		# there isn't a special key converter, use the normal aspect to string converter.
 		if (self.groupKeyGetter is None and self.groupKeyConverter is None):
-			return self._StringToValue(groupKey, self.stringConverter)
+			return _StringToValue(groupKey, self.stringConverter, extraArgs = [self])
 		else:
-			return self._StringToValue(groupKey, self.groupKeyConverter)
+			return _StringToValue(groupKey, self.groupKeyConverter, extraArgs = [self])
 
 	def GetGroupTitle(self, group, useItemCount):
 		"""
@@ -3225,10 +3173,15 @@ def printCurrentTrace(printout = True):
 	else:
 		return code
 
-def _StringToValue(value, converter):
+def _StringToValue(value, converter, extraArgs = []):
 	"""
 	Convert the given value to a string, using the given converter
 	"""
+	if (extraArgs):
+		try:
+			return converter(value, *extraArgs)
+		except:
+			pass
 	try:
 		return converter(value)
 	except TypeError:
@@ -3794,6 +3747,8 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			raise AttributeError(f"There is no column {column}")
 
 		if (isinstance(node, DataListGroup)):
+			if (isinstance(defn.renderer, (Renderer_Text, Renderer_Choice))):
+				return (node.title, node.title)
 			return node.title
 
 		if (alternateGetter):
@@ -3806,12 +3761,12 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		# _log("@model.GetValue", defn.renderer, node.__repr__(), defn.valueGetter, value, defn.stringConverter)
 
-		if (isinstance(defn.renderer, (Renderer_Text))):
+		if (isinstance(defn.renderer, (Renderer_Text, Renderer_Choice))):
 			#Account for formatter
-			return (value, _StringToValue(value, defn.stringConverter))
+			return (value, _StringToValue(value, defn.stringConverter, extraArgs = [defn]))
 		
-		if (isinstance(defn.renderer, (Renderer_Choice, wx.dataview.DataViewTextRenderer, wx.dataview.DataViewChoiceRenderer))):
-			return _StringToValue(value, defn.stringConverter)
+		if (isinstance(defn.renderer, (wx.dataview.DataViewTextRenderer, wx.dataview.DataViewChoiceRenderer))):
+			return _StringToValue(value, defn.stringConverter, extraArgs = [defn])
 
 		elif (isinstance(defn.renderer, (Renderer_Spin, wx.dataview.DataViewSpinRenderer,
 			wx.dataview.DataViewProgressRenderer, Renderer_Progress))):
@@ -4743,9 +4698,15 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 	"""
 	*choices* can now be a function that returns a list of choices.
+
+	*default* is what selection the editor defaults to. Can be an integer or string that is in *choices*.
+	If *default* == None: Will try using what was in the cell (may not work with formatted text)
+	
+	*default* and *choices* can also be callable functions 
+	that accept the following args: unformatted_value, formatted_value
 	"""
 
-	def __init__(self, choices = [], ellipsize = True, **kwargs):
+	def __init__(self, choices = [], ellipsize = True, default = None, **kwargs):
 		# _log("@Renderer_Choice.__init__", choices, kwargs)
 
 		self.choices = choices
@@ -4754,14 +4715,23 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 		else:
 			wx.dataview.DataViewChoiceRenderer.__init__(self, choices, **kwargs)
 		self.type = "choice"
-		self.buildingKwargs = {**kwargs, "choices": choices, "ellipsize": ellipsize}
+		self.buildingKwargs = {**kwargs, "choices": choices}
 		
+		self.SetDefault(default)
 		self.SetEllipsize(ellipsize)
 
 	def Clone(self, **kwargs):
 		#Any keywords in kwargs will override keywords in buildingKwargs
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
+
+	def SetValue(self, value):
+		# _log("@Renderer_Choice.SetValue", value)
+		return super().SetValue(value[1])
+
+	def SetDefault(self, default = None):
+		self.default = default
+		self.buildingKwargs["default"] = default
 
 	def SetEllipsize(self, ellipsize = None):
 		self.ellipsize = ellipsize
@@ -4774,15 +4744,23 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 		# _log("@Renderer_Choice.CreateEditorCtrl", parent, labelRect, value, self.choices)
 
 		if (callable(self.choices)):
-			choices = self.choices()
+			choices = _Munge(value[0], self.choices, extraArgs = [value[1]], returnMunger_onFail = True)
 		else:
 			choices = self.choices
 
+		default = _Munge(value[0], self.default, extraArgs = [value[1]], returnMunger_onFail = True)
+		if (default == None):
+			default = value[1]
+
 		window = wx.Choice(parent, id = wx.ID_ANY, pos = labelRect.GetTopLeft(), size = labelRect.GetSize(), choices = choices)
 		try:
-			window.SetSelection(choices.index(value))
-		except ValueError as error:
-			pass
+			window.SetSelection(choices.index(default))
+		except:
+			try:
+				window.SetSelection(default)
+			except:
+				pass
+
 		return window
 
 class Renderer_Text(wx.dataview.DataViewTextRenderer):
