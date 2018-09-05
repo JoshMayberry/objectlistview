@@ -40,6 +40,7 @@ __date__ = "18 June 2008"
 
 import os
 import ast
+import time
 import types
 import datetime
 
@@ -89,7 +90,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Create a DataObjectListView.
 
 		"""
-		_log("@DataObjectListView.__init__")
 
 		#Standard
 		self.columns = {}
@@ -97,6 +97,8 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.colorOverride_row = {}
 		self.colorOverride_cell = {}
 		self.colorOverride_column = {}
+		self.colorOverride_function = None
+		self.colorOverride_groupFunction = None
 		self.lastSelected = None
 
 		useWeakRefs 			= kwargs.pop("useWeakRefs", False)
@@ -287,9 +289,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		#FOR DEBUGGING 
 	# 	item = event.GetItem()
 	# 	print("@5.1", item.IsOk())
-	# 	_log("@5.1")
 	# 	super().Expand(item)
-	# 	_log("@5.2")
 	# 	print("@5.2", self.IsExpanded(item), self.model.IsContainer(item))
 	# 	event.Skip()
 
@@ -304,7 +304,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Associates the ListCtrl with the supplied model.
 		If *model* is None, will use *NormalListModel*.
 		"""
-		_log("@DataObjectListView.SetModel", model)
 
 		# Create an instance of our model...
 		if model is None:
@@ -317,7 +316,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.model.DecRef() # avoid memory leak
 
 	def SetColumns(self, columns, repopulate = True):
-		_log("@DataObjectListView.SetColumns", columns, repopulate)
 		sortCol = self.GetSortColumn()
 		self.ClearColumns()
 		self.ClearAll()
@@ -358,7 +356,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		If this method is called directly, you must also call RepopulateList()
 		to populate the new column with data.
 		"""
-		_log("@DataObjectListView.AddColumnDefn", defn)
 		self.columns[index or len(self.columns)] = defn
 
 		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewColumn.html
@@ -390,7 +387,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Set the list of modelObjects to be displayed by the control.
 		"""
-		_log("@DataObjectListView.SetObjects", modelObjects, preserveSelection)
 
 		if (preserveSelection):
 			selection = self.GetSelectedObjects()
@@ -479,6 +475,31 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			self.colorOverride_cell[(modelObject, index)] = color
 		elif ((modelObject, index) in self.colorOverride_cell):
 			del self.colorOverride_cell[(modelObject, index)]
+
+		self.model.Cleared()
+
+	def SetColorFunction(self, function = None):
+		"""
+		A function can be used to override row color instead of using
+		SetRowColour, SetColumnColour, and SetCellColour.
+
+		*function* must accept the following args: row, column
+		*function* must return a valid wxColor or None
+
+		If None, the functions mentioned above will be used.
+		"""
+		self.colorOverride_function = function
+
+		self.model.Cleared()
+
+	def SetColorGroupFunction(self, function = None):
+		"""
+		A function can be used to override goup color.
+
+		*function* must accept the following args: row, column
+		*function* must return a valid wxColor or None
+		"""
+		self.colorOverride_groupFunction = function
 
 		self.model.Cleared()
 
@@ -629,7 +650,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Progressively yield all selected items
 		"""
-		_log("@DataObjectListView.YieldSelected")
 
 		for item in self.GetSelections():
 			yield self.model.ItemToObject(item)
@@ -638,7 +658,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Return the selected modelObject or None if nothing is selected
 		"""
-		_log("@DataObjectListView.GetSelectedObject")
 		for model in self.YieldSelectedObjects():
 			return model
 		return None
@@ -647,14 +666,12 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Return a list of the selected modelObjects
 		"""
-		_log("@DataObjectListView.GetSelectedObjects")
 		return list(self.YieldSelectedObjects())
 
 	def YieldSelectedObjects(self):
 		"""
 		Progressively yield the selected modelObjects
 		"""
-		_log("@DataObjectListView.YieldSelectedObjects")
 
 		for item in self.YieldSelected():
 			if (not isinstance(item, DataListGroup)):
@@ -664,7 +681,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Return the selected groups or None if nothing is selected
 		"""
-		_log("@DataObjectListView.GetSelectedGroup")
 		for model in self.YieldSelectedGroups():
 			return model
 		return None
@@ -673,14 +689,12 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Return a list of the selected groups
 		"""
-		_log("@DataObjectListView.GetSelectedGroups")
 		return list(self.YieldSelectedGroups())
 
 	def YieldSelectedGroups(self):
 		"""
 		Progressively yield the selected groups
 		"""
-		_log("@DataObjectListView.YieldSelectedGroups")
 
 		for item in self.YieldSelected():
 			if (isinstance(item, DataListGroup)):
@@ -1069,7 +1083,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Collapse the given group and redisplay the list
 		"""
-		# _log("@DataObjectListView.Collapse", group)
 		self._DoExpandCollapse([group], False)
 
 	def ExpandAll(self, groups=None):
@@ -1093,7 +1106,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Do the real work of expanding/collapsing the given groups
 		"""
-		_log("@DataObjectListView._DoExpandCollapse", groups, isExpanding)
 		# Cull groups that aren't going to change
 		groups = [x for x in groups if x.IsExpanded() != isExpanding]
 		if not groups:
@@ -1140,7 +1152,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Resize our auto sizing columns to match the data
 		"""
-		# _log("@DataObjectListView.AutoSizeColumns")
 		for iCol, col in self.columns.items():
 			if (col.width == wx.LIST_AUTOSIZE):
 				col.column.SetWidth(wx.LIST_AUTOSIZE)
@@ -1158,7 +1169,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Change the width of space filling columns so that they fill the
 		unoccupied width of the listview
 		"""
-		# _log("@DataObjectListView._ResizeSpaceFillingColumns")
 		# If the list isn't in report view or there are no space filling
 		# columns, just return
 		if (not self.InReportView()):
@@ -1232,8 +1242,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		try:
 			self.Freeze()
 			self.modelObjects.extend(modelObjects)
-			self.UpdateUnsorted(preserveExpansion = preserveExpansion)
-			self.model.ItemsAdded(None, modelObjects)
+			# self.UpdateUnsorted(preserveExpansion = preserveExpansion)
+			self.RebuildGroups(preserveExpansion = preserveExpansion)
+			self.model.ItemsAdded(modelObjects)
 		finally:
 			self.Thaw()
 
@@ -1288,7 +1299,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Completely rebuild the contents of the list control
 		"""
-		_log("@DataObjectListView.RepopulateList")
 
 		self.model.Cleared()
 
@@ -1314,7 +1324,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Only use this if SetObjects() has been called. If you have specifically created
 		your groups and called SetGroups(), do not use this method.
 		"""
-		_log("@DataObjectListView.RebuildGroups")
 		if (not self.showGroups):
 			return
 
@@ -1327,7 +1336,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		Returns the created collection of DataListGroups
 		"""
-		_log("@DataObjectListView._BuildGroups", modelObjects)
 		if (modelObjects is None):
 			modelObjects = self.modelObjects
 
@@ -1381,7 +1389,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Present the collection of DataListGroups in this control.
 		"""
-		_log("@DataObjectListView._SetGroups", groups)
 		self.groups = groups
 		self.RepopulateList()
 
@@ -1389,7 +1396,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Rebuild the titles of the given groups
 		"""
-		_log("@DataObjectListView._BuildGroupTitles", groups, groupingColumn)
 		for x in groups:
 			x.title = groupingColumn.GetGroupTitle(x, self.GetShowItemCounts())
 
@@ -1400,7 +1406,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Enable automatic sorting when the user clicks on a column title
 		If *column* is None, applies to all columns.
 		"""
-		_log("@DataObjectListView.EnableSorting")
 		if (column != None):
 			self.columns[column].SetSortable(state)
 		else:
@@ -1413,14 +1418,12 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		If *column* is None, applies to all columns.
 		"""
 
-		_log("@DataObjectListView.DisableSorting")
 		self.EnableSorting(column = column, state = not state)
 
 	def SortBy(self, newColumnIndex, ascending = True):
 		"""
 		Sort the items by the given column
 		"""
-		_log("@DataObjectListView.SortBy", newColumnIndex, ascending)
 		self.SetSortColumn(newColumnIndex, ascending = ascending, resortNow = True)
 
 	def GetSortColumn(self, returnIndex = False):
@@ -1469,10 +1472,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		if (resortNow):
 			self.model.Resort()
 
-	def UpdateUnsorted(self, preserveExpansion = True):
-		if (self.unsortedFunction):
-			self.modelObjects = self.unsortedFunction(self.modelObjects)
-		self.RebuildGroups(preserveExpansion = preserveExpansion)
+	# def UpdateUnsorted(self, preserveExpansion = True):
+	# 	if (self.unsortedFunction):
+	# 		self.modelObjects = self.unsortedFunction(self.modelObjects)
 
 	def SetUnsortedFunction(self, function, repopulate = True):
 		"""
@@ -1496,6 +1498,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		If it returns None, the default compare function will be used.
 		"""
 		self.compareFunction = function
+		self.model.SelectCompare()
 
 		if (repopulate):
 			self.RepopulateList()
@@ -1511,6 +1514,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		If it returns None, the default compare function will be used.
 		"""
 		self.groupCompareFunction = function
+		self.model.SelectCompare()
 
 		if (repopulate):
 			self.RepopulateList()
@@ -1549,7 +1553,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	# 	The rect returned takes scroll position into account, so negative x and y are
 	# 	possible.
 	# 	"""
-	# 	_log("@DataObjectListView.GetSubItemRect", rowIndex, subItemIndex, flag)
 	# 	# Linux doesn't handle wx.LIST_RECT_LABEL flag. So we always get
 	# 	# the whole bounds then par it down to the cell we want
 	# 	rect = self.GetItemRect(rowIndex, wx.LIST_RECT_BOUNDS)
@@ -1586,7 +1589,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 	# 	This uses the buildin version on Windows, and poor mans replacement on other platforms.
 	# 	"""
-	# 	_log("@DataObjectListView.HitTestSubItem", pt)
 	# 	# The buildin version works on Windows
 	# 	if (wx.Platform == "__WXMSW__"):
 	# 		return wx.ListCtrl.HitTestSubItem(self, pt)
@@ -2316,7 +2318,6 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		The ListView is being resized
 		"""
-		_log("@DataObjectListView._HandleSize")
 		# self._PossibleFinishCellEdit()
 		event.Skip()
 		self._ResizeSpaceFillingColumns()
@@ -2593,7 +2594,6 @@ class DataColumnDefn(object):
 		"""
 		Create a new ColumnDefn using the given attributes.
 		"""
-		_log("@DataColumnDefn.__init__")
 		self.title = title
 		self.align = align
 		self.column = None
@@ -2667,7 +2667,6 @@ class DataColumnDefn(object):
 		"""
 		Return the width of the column.
 		"""
-		_log("@DataColumnDefn.GetWidth")
 		return self.column.GetWidth()
 
 	def SetWidth(self, width = None):
@@ -2675,7 +2674,6 @@ class DataColumnDefn(object):
 		Change the width of the column.
 		If 'width' is None, it will auto-size.
 		"""
-		_log("@DataColumnDefn.SetWidth", width)
 		if (width == None):
 			width = wx.LIST_AUTOSIZE
 
@@ -2685,7 +2683,6 @@ class DataColumnDefn(object):
 		"""
 		Return the alignment that this column uses
 		"""
-		_log("@DataColumnDefn.GetAlignment")
 		#https://wxpython.org/Phoenix/docs/html/wx.Alignment.enumeration.html
 		alignment = {
 			None: wx.ALIGN_NOT,
@@ -2771,7 +2768,6 @@ class DataColumnDefn(object):
 		"""
 		Return the value for this column from the given modelObject
 		"""
-		_log("@DataColumnDefn.GetValue", modelObject)
 		return _Munge(modelObject, self.valueGetter)
 
 	def GetStringValue(self, modelObject):
@@ -2826,7 +2822,6 @@ class DataColumnDefn(object):
 		"""
 		Set this columns aspect of the given modelObject to have the given value.
 		"""
-		# _log("@DataColumnDefn.SetValue", modelObject, value)
 		if (self.valueSetter is None):
 			return _SetValueUsingMunger(modelObject, value, self.valueGetter)
 		else:
@@ -2839,7 +2834,6 @@ class DataColumnDefn(object):
 		"""
 		Calculate the given width bounded by the (optional) minimum and maximum column widths
 		"""
-		# _log("@DataColumnDefn.CalcBoundedWidth", width)
 		# Values of < 0 have special meanings, so just return them
 		if width < 0:
 			return width
@@ -2855,7 +2849,6 @@ class DataColumnDefn(object):
 		"""
 		Returns the default renderer for this column
 		"""
-		_log("@DataColumnDefn.GetRenderer")
 		return self.renderer
 
 	def SetRenderer(self, renderer, *args, refreshColumn = True, **kwargs):
@@ -2863,7 +2856,6 @@ class DataColumnDefn(object):
 		Applies the provided renderer
 		"""
 		global rendererCatalogue
-		_log("@DataColumnDefn.SetRenderer", renderer, args, kwargs) 
 
 		renderer = _Munge(self, renderer, returnMunger_onFail = True)
 		try:
@@ -3142,12 +3134,6 @@ class UndoPaste():
 		return self.undo(undo = not redo)
 
 #Utility Functions
-def _log(*data):
-	pass
-# 	with open("log.txt", "a") as f:
-# 		f.write(f"{', '.join([f'{item}' for item in data])}\n")
-# open('log.txt', 'w').close()
-
 def printCurrentTrace(printout = True):
 	"""Prints out the stack trace for the current place in the program.
 	Modified Code from codeasone on https://stackoverflow.com/questions/1032813/dump-stacktraces-of-all-active-threads
@@ -3485,6 +3471,7 @@ def _unclip(dc):
 
 #Models
 #https://github.com/wxWidgets/Phoenix/blob/master/samples/dataview/DataViewModel.py
+dummy = type("Dummy", (object,), {})
 class NormalListModel(wx.dataview.PyDataViewModel):
 	"""Displays like an ObjectListView or GroupListView."""
 	#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewItemObjectMapper.html
@@ -3498,6 +3485,8 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		self.sortCounter = None
 		self.sort_colorCatalogue = {}
 
+		self.SelectCompare()
+
 		# The PyDataViewModel derives from both DataViewModel and from
 		# DataViewItemObjectMapper, which has methods that help associate
 		# data view items with Python objects. Normally a dictionary is used
@@ -3510,7 +3499,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def GetAttr(self, item, column, attribute):
 		#Override this to indicate that the item has special font attributes.
 		#The base class version always simply returns False.
-		# _log("@model.GetAttr", item, column, attribute)
 
 		node = self.ItemToObject(item)
 		def applyColor(color, odd = None):
@@ -3525,16 +3513,45 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				else:
 					attribute.SetBackgroundColour(color[1])
 
-		if ((node, column) in self.olv.colorOverride_cell):
-			applyColor(self.olv.colorOverride_cell[(node, column)])
+			return True
 
-		elif (column in self.olv.colorOverride_column):
-			applyColor(self.olv.colorOverride_column[column])
+		try:
+			if (isinstance(node, DataListGroup)):
+				attribute.SetBold(self.olv.groupFont[0])
+				attribute.SetItalic(self.olv.groupFont[1])
 
-		elif (node in self.olv.colorOverride_row):
-			applyColor(self.olv.colorOverride_row[node])
-		
-		elif (not isinstance(node, DataListGroup)):
+				if (self.olv.colorOverride_groupFunction):
+					try:
+						color = self.olv.colorOverride_groupFunction(node, self.olv.columns[column])
+					except Exception as error:
+						print(error)
+						color = None
+
+					if (color != None):
+						return applyColor(color)
+
+				attribute.SetColour(self.olv.groupFont[2])
+				return True
+
+			if (self.olv.colorOverride_function):
+				try:
+					color = self.olv.colorOverride_function(node, self.olv.columns[column])
+				except Exception as error:
+					print(error)
+					color = None
+
+				if (color != None):
+					return applyColor(color)
+
+			if ((node, column) in self.olv.colorOverride_cell):
+				return applyColor(self.olv.colorOverride_cell[(node, column)])
+
+			if (column in self.olv.colorOverride_column):
+				return applyColor(self.olv.colorOverride_column[column])
+
+			if (node in self.olv.colorOverride_row):
+				return applyColor(self.olv.colorOverride_row[node])
+			
 			if (self.sortCounter != None):
 				if (node not in self.sort_colorCatalogue):
 					if (self.sortCounter % 2):
@@ -3542,19 +3559,14 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 					else:
 						self.sort_colorCatalogue[node] = self.olv.oddRowsBackColor
 					self.sortCounter += 1
-				applyColor(self.sort_colorCatalogue[node])
-			elif (node in self.colorCatalogue):
-				applyColor(self.colorCatalogue[node])
+				return applyColor(self.sort_colorCatalogue[node])
+			
+			if (node in self.colorCatalogue):
+				return applyColor(self.colorCatalogue[node])
 
-		else:
-			attribute.SetBold(self.olv.groupFont[0])
-			attribute.SetItalic(self.olv.groupFont[1])
-			attribute.SetColour(self.olv.groupFont[2])
-
-		if (self.olv.rowFormatter is not None):
-			self.olv.rowFormatter(node, column, attribute)
-
-		return True
+		finally:
+			if (self.olv.rowFormatter is not None):
+				self.olv.rowFormatter(node, column, attribute)
 
 	def GetChildrenList(self, parent):
 		children = wx.dataview.DataViewItemArray()
@@ -3564,7 +3576,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def GetChildren(self, parent, children):
 		#Override this so the control can query the child items of an item.
 		#Returns the number of items.
-		_log("@model.GetChildren", parent, children, not parent)#, self.olv.modelObjects, self.olv.groups)
 
 		def applyRowColor(rows):
 			if (self.olv.useAlternateBackColors and self.olv.InReportView()):
@@ -3629,8 +3640,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def GetParent(self, item):
 		#Override this to indicate which wx.dataview.DataViewItem representing the parent of item 
 		#or an invalid wx.dataview.DataViewItem if the root item is the parent item.
-		_log("@model.GetParent", item)
-		# Return the item which is this item's parent.
 
 		if (not self.olv.showGroups):
 			return wx.dataview.NullDataViewItem
@@ -3643,14 +3652,11 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			node = item
 
 		if (isinstance(node, DataListGroup)):
-			_log("@model.GetParent - Null 1")
 			return wx.dataview.NullDataViewItem
 		else:
 			for group in self.olv.groups:
 				if (node in group.modelObjects):
-					_log("@model.GetParent -", group)
 					return self.ObjectToItem(group)
-			_log("@model.GetParent - Null 2")
 			return wx.dataview.NullDataViewItem
 
 	def GetFirstItem(self):
@@ -3733,7 +3739,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def GetValue(self, item, column, alternateGetter = None, raw = False):
 		#Override this to indicate the value of item.
 		#A Variant is used to store the data.
-		# _log("@model.GetValue", item, column, alternateGetter)
 
 		# Return the value to be displayed for this item and column. For this
 		# example we'll just pull the values from the data objects we
@@ -3759,7 +3764,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		if (raw):
 			return value
 
-		# _log("@model.GetValue", defn.renderer, node.__repr__(), defn.valueGetter, value, defn.stringConverter)
 
 		if (isinstance(defn.renderer, (Renderer_Text, Renderer_Choice))):
 			#Account for formatter
@@ -3799,7 +3803,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# The most common scenario is that the wx.dataview.DataViewCtrl calls this method after the user changed some data in the view.
 		# This is the function you need to override in your derived class but if you want to call it, 
 		# ChangeValue is usually more convenient as otherwise you need to manually call ValueChanged to update the control itself.
-		_log("@model.SetValue", value, item, column)
 
 		# We're not allowing edits in column zero (see below) so we just need
 		# to deal with Song objects and cols 1 - 5
@@ -3816,7 +3819,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		if (isinstance(defn.renderer, (wx.dataview.DataViewIconTextRenderer, Renderer_Icon)) and (isinstance(value, wx.dataview.DataViewIconText))):
 			value = value.GetText()
 
-		# _log("@model.SetValue", value, node.__repr__(), column, defn.valueSetter, defn.valueGetter)
 		if (defn.valueSetter is None):
 			_SetValueUsingMunger(node, value, defn.valueGetter, extraArgs = [defn])
 		else:
@@ -3829,14 +3831,12 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		#Override this method to indicate if a container item merely acts as a headline (or for categorisation) 
 		#or if it also acts a normal item with entries for further columns.
 		#By default returns False.
-		# _log("@model.HasContainerColumns", item)
 		return super().HasContainerColumns(item)
 
 	def HasDefaultCompare(self):
 		# Override this to indicate that the model provides a default compare function that the control should use if no wx.dataview.DataViewColumn has been chosen for sorting.
 		# Usually, the user clicks on a column header for sorting, the data will be sorted alphanumerically.
 		# If any other order (e.g. by index or order of appearance) is required, then this should be used. See wx.dataview.DataViewIndexListModel for a model which makes use of this.
-		# _log("@model.HasDefaultCompare")
 		return super().HasDefaultCompare()
 
 	def HasValue(self, item, column):
@@ -3844,7 +3844,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		# All normal items have values in all columns but the container items only show their label in the first column (column == 0) by default (but see HasContainerColumns ). 
 		#So this function always returns True for the first column while for the other ones it returns True only if the item is not a container or HasContainerColumns was overridden to return True for it.
-		# _log("@model.HasValue", item, column)
 		return super().HasValue(item, column)
 
 	def IsContainer(self, item):
@@ -3858,7 +3857,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		# and in this model the genre objects are containers
 		node = self.ItemToObject(item)
-		# _log("@model.IsContainer", item, node)
 		if (isinstance(node, DataListGroup)):
 			return True
 
@@ -3871,20 +3869,17 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# Disabled items are displayed differently (e.g. grayed out) and cannot be interacted with.
 		# The base class version always returns True, thus making all items enabled by default.
 
-		# _log("@model.IsEnabled", item, column)
 		return super().IsEnabled(item, column)
 
 	# Report how many columns this model provides data for.
 	def GetColumnCount(self):
 		#Override this to indicate the number of columns in the model.
-		_log("@model.GetColumnCount")
 		return len(self.olv.columns)
 
 	# Map the data column numbers to the data type
 	def GetColumnType(self, column):
 		#Override this to indicate what type of data is stored in the column specified by column.
 		#This should return a string indicating the type of data as reported by Variant .
-		_log("@model.GetColumnType", column)
 		hgjhghj
 
 		mapper = { 0 : 'string',
@@ -3900,13 +3895,11 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def Cleared(self):
 		#Called to inform the model that all data has been cleared.
 		#The control will reread the data from the model again.
-		_log("@model.Cleared")
 		return super().Cleared()
 
 	def ChangeValue(self, value, item, column):
 		#Change the value of the given item and update the control to reflect it.
 		#This function simply calls SetValue and, if it succeeded, ValueChanged.
-		_log("@model.ChangeValue", value, item, column)
 
 		#super().ChangeValue does not accept a value of None, so the logic is redone here
 		if (self.SetValue(value, item, column)):
@@ -3918,58 +3911,53 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# Call this to inform this model that a value in the model has been changed.
 		# This is also called from wx.dataview.DataViewCtrl‘s internal editing code, e.g. when editing a text field in the control.
 		# This will eventually emit a wxEVT_DATAVIEW_ITEM_VALUE_CHANGED event to the user.
-		_log("@model.ValueChanged", item, column)
 		return super().ValueChanged(item, column)
 
 	def ItemAdded(self, parent, item):
 		#Call this to inform the model that an item has been added to the data.
-		_log("@model.ItemAdded", parent, item)
 
-		if (parent is None):
-			parent = self.GetParent(item)
-			# self.ItemChanged(parent)
-		if (not isinstance(item, wx.dataview.DataViewItem)):
-			item = self.ObjectToItem(item)
-
-		#Account for filter
 		try:
-			return super().ItemAdded(parent, item)
+			super().ItemAdded(parent, item)
 		except wx._core.wxAssertionError:
 			#The filter has removed the item from the list
 			return True
+		except TypeError:
+			#The item was not converted
+			return super().ItemAdded(parent, self.ObjectToItem(item))
 
 	def ItemChanged(self, item):
 		#Call this to inform the model that an item has changed.
 		# This will eventually emit a wxEVT_DATAVIEW_ITEM_VALUE_CHANGED event (in which the column fields will not be set) to the user.
-		_log("@model.ItemChanged", item)
 		if (not isinstance(item, wx.dataview.DataViewItem)):
 			item = self.ObjectToItem(item)
 		return super().ItemChanged(item)
 
 	def ItemDeleted(self, parent, item):
 		#Call this to inform the model that an item has been deleted from the data.
-		_log("@model.ItemDeleted", parent, item)
 		if (parent is None):
 			parent = self.GetParent(item)
 		if (not isinstance(item, wx.dataview.DataViewItem)):
 			item = self.ObjectToItem(item)
 		return super().ItemDeleted(parent, item)
 
-	def ItemsAdded(self, parent, items):
-		#Call this to inform the model that several items have been added to the data.
-		_log("@model.ItemsAdded", parent, items)
+	def ItemsAdded(self, items):
+		"""Call this to inform the model that several items have been added to the data."""
 
-		if (parent is not None):
-			super().ItemsAdded(parent, items)
-		else:
-			for item in items:
-				answer = self.ItemAdded(parent, item)
+		#If a large list has all items filtered out, it will make super().ItemAdded take over 8000 times longer
+		if (self.olv.filter):
+			try:
+				next(iter(self.olv.filter(items)))
+			except StopIteration:
+				return True
+
+		parent = self.ObjectToItem(dummy) #This speeds up the super() function WAY more than NullDataViewItem does. And, it doesn't seem to matter
+		for item in items:
+			self.ItemAdded(parent, self.ObjectToItem(item))
 		return True
 
 	def ItemsChanged(self, items):
 		# Call this to inform the model that several items have changed.
 		# This will eventually emit wxEVT_DATAVIEW_ITEM_VALUE_CHANGED events (in which the column fields will not be set) to the user.
-		_log("@model.ItemsChanged", items)
 
 		for item in items:
 			answer = self.ItemChanged(item)
@@ -3977,7 +3965,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 	def ItemsDeleted(self, parent, items):
 		# Call this to inform the model that several items have been deleted.
-		_log("@model.ItemsDeleted", items)
 
 		if (parent is not None):
 			return super().ItemsDeleted(parent, items)
@@ -3989,7 +3976,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	#Sorting-------------------------------------------------------
 	def Resort(self):
 		# Call this to initiate a resort after the sort function has been changed.
-		_log("@model.Resort")
 
 		if (self.olv._paste_ignoreSort):
 			return
@@ -4008,7 +3994,8 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		self.sortCounter = 0
 		self.sort_colorCatalogue = {}
 
-		return super().Resort()
+		answer = super().Resort()
+		return answer
 
 	def GetSortValue(self, item, column):
 		"""Returns the value to be used for sorting."""
@@ -4020,7 +4007,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		if (isinstance(defn.renderer, (wx.dataview.DataViewBitmapRenderer, Renderer_Bmp, Renderer_MultiImage))):
 			#Do not compare images
-			return 0
+			return (False, 0)
 		
 		if (isinstance(defn.renderer, (wx.dataview.DataViewIconTextRenderer, Renderer_Icon))):
 			#Only compare the text
@@ -4037,56 +4024,90 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				value = value.lower()
 			except AttributeError:
 				pass
-		return value
+		
+		#Account for None being a value
+		return (value is None, value)
 
-	def Compare(self, item1, item2, column, ascending):
+	def SelectCompare(self):
+		"""Different case functions have been created to speed up calls to the function Compare()."""
+
+		if (self.olv.compareFunction == None):
+			if (self.olv.groupCompareFunction == None):
+				self.Compare = self.Compare_None
+			else:
+				self.Compare = self.Compare_Group
+		else:
+			if (self.olv.groupCompareFunction == None):
+				self.Compare = self.Compare_Row
+			else:
+				self.Compare = self.Compare_GroupRow
+
+	def Compare_None(self, item1, item2, column, ascending):
+		"""This compare function will run if the user does not plan on intercepting it themselves."""
+
 		#The compare function to be used by control.
 		#The default compare function sorts by container and other items separately and in ascending order. Override this for a different sorting behaviour.
 		#The comparison function should return negative, null or positive value depending on whether the first item is less than, equal to or greater than the second one. 
 		#The items should be compared using their values for the given column.
-		_log("@model.Compare", item1, item2, column, ascending)
-
-		answer = None
-		node1 = self.ItemToObject(item1)
-		node2 = self.ItemToObject(item2)
-		if (isinstance(node1, DataListGroup)):
-			if (self.olv.groupCompareFunction != None):
-				answer = self.olv.groupCompareFunction(node1, node2, self.olv.columns[column], ascending)
-		else:
-			if (self.olv.compareFunction != None):
-				answer = self.olv.compareFunction(node1, node2, self.olv.columns[column], ascending)
-		if (answer != None):
-			return answer
 
 		value1 = self.GetSortValue(item1, column)
 		value2 = self.GetSortValue(item2, column)
 
 		#The builtin function cmp is depricated now
-		#Account for None being a value
-		if ((value1 is None, value1) < (value2 is None, value2)):
+		if (value1 < value2):
 			return (1, -1)[ascending]
-		elif ((value1 is None, value1) > (value2 is None, value2)):
+		elif (value1 > value2):
 			return (-1, 1)[ascending]
 		else:
 			return 0
 
+	Compare = Compare_None #Compare_None is the default function to use for Compare
+
+	def Compare_Row(self, item1, item2, column, ascending):
+		"""This compare function will run if the user plans on intercepting only rows themselves."""
+
+		node = self.ItemToObject(item1)
+		if (not isinstance(node, DataListGroup)):
+			answer = self.olv.compareFunction(node, self.ItemToObject(item2), self.olv.columns[column], ascending)
+			if (answer != None):
+				return answer
+		return self.Compare_None(item1, item2, column, ascending)
+
+	def Compare_Group(self, item1, item2, column, ascending):
+		"""This compare function will run if the user plans on intercepting only groups themselves."""
+
+		node = self.ItemToObject(item1)
+		if (isinstance(node, DataListGroup)):
+			answer = self.olv.groupCompareFunction(node, self.ItemToObject(item2), self.olv.columns[column], ascending)
+			if (answer != None):
+				return answer
+		return self.Compare_None(item1, item2, column, ascending)
+
+	def Compare_GroupRow(self, item1, item2, column, ascending):
+		"""This compare function will run if the user plans on intercepting both groups and rows themselves."""
+
+		node = self.ItemToObject(item1)
+		if (isinstance(node, DataListGroup)):
+			answer = self.olv.groupCompareFunction(node, self.ItemToObject(item2), self.olv.columns[column], ascending)
+		else:
+			answer = self.olv.compareFunction(node, self.ItemToObject(item2), self.olv.columns[column], ascending)
+		if (answer != None):
+			return answer
+		return self.Compare_None(item1, item2, column, ascending)
+
 	#Unused -----------------------------------------------------------------------------
 	def AddNotifier(self, notifier):
 		#Adds a wx.dataview.DataViewModelNotifier to the model.
-		_log("@model.AddNotifier", notifier)
 		return super().AddNotifier(notifier)
 
 	def RemoveNotifier(self, notifier):
 		# Remove the notifier from the list of notifiers.
-		_log("@model.RemoveNotifier", notifier)
 		return super().RemoveNotifier(notifier)
 
 	def IsListModel(self):
-		# _log("@model.IsListModel")
 		return super().IsListModel()
 
 	def IsVirtualListModel(self):
-		# _log("@model.IsVirtualListModel", super().IsVirtualListModel(), super().IsListModel())
 		return super().IsVirtualListModel()
 
 #Renderers
@@ -4099,7 +4120,6 @@ class Renderer_MultiImage(wx.dataview.DataViewCustomRenderer):
 	"""
 
 	def __init__(self, image = None, **kwargs):
-		_log("@Renderer_MultiImage.__init__", kwargs)
 		wx.dataview.DataViewCustomRenderer.__init__(self, **kwargs)
 		self.type = "multi_bmp"
 		self.buildingKwargs = {**kwargs, "image": image}
@@ -4113,16 +4133,13 @@ class Renderer_MultiImage(wx.dataview.DataViewCustomRenderer):
 		return super().__self_class__(**instructions)
 
 	def SetValue(self, value):
-		# _log("@Renderer_MultiImage.SetValue", value)
 		self.value = value
 		return True
 
 	def GetValue(self):
-		# _log("@Renderer_MultiImage.GetValue")
 		return self.value
 
 	def GetSize(self):
-		# _log("@Renderer_MultiImage.GetSize")
 		# Return the size needed to display the value.  The renderer
 		# has a helper function we can use for measuring text that is
 		# aware of any custom attributes that may have been set for
@@ -4130,7 +4147,6 @@ class Renderer_MultiImage(wx.dataview.DataViewCustomRenderer):
 		return (-1, -1)
 
 	def Render(self, rect, dc, state):
-		# _log("@Renderer_MultiImage.Render", rect, dc, state, self.image, self.value)
 
 		x, y, width, height = rect
 		totalWidth = 0
@@ -4162,7 +4178,6 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 	"""
 
 	def __init__(self, text = None, function = None, enabled = None, useNativeRenderer = False, ellipsize = True, mode = wx.dataview.DATAVIEW_CELL_ACTIVATABLE, **kwargs):
-		# _log("@Renderer_Button.__init__", text, function, useNativeRenderer, mode, kwargs)
 		wx.dataview.DataViewCustomRenderer.__init__(self, mode = mode, **kwargs)
 		self.type = "button"
 		self.buildingKwargs = {**kwargs, "text": text, "function": function, "enabled": enabled, "useNativeRenderer": useNativeRenderer, "mode": mode}
@@ -4198,7 +4213,6 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def SetValue_both(self, value):
-		# _log("@Renderer_Button.SetValue_both", value)
 		self._node = value[0]
 		self._column = value[1]
 		self._text = value[2][0]
@@ -4211,7 +4225,6 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def SetValue_function(self, value):
-		# _log("@Renderer_Button.SetValue_function", value)
 		self._node = value[0]
 		self._column = value[1]
 		self._applyFunction(value[2])
@@ -4224,7 +4237,6 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def SetValue_text(self, value):
-		# _log("@Renderer_Button.SetValue_text", value)
 		self._node = value[0]
 		self._column = value[1]
 		self._applyFunction(_Munge(self._node, self.function, returnMunger_onFail = True))
@@ -4237,7 +4249,6 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def SetValue(self, value):
-		# _log("@Renderer_Button.SetValue", value, self.function, self.text)
 		self._node = value[0]
 		self._column = value[1]
 		self._applyFunction(_Munge(self._node, self.function, returnMunger_onFail = True))
@@ -4257,15 +4268,12 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 			self._function = None
 
 	def GetValue(self):
-		# _log("@Renderer_Button.GetValue")
 		return self.function
 
 	def GetSize(self):
-		# _log("@Renderer_Button.GetSize")
 		return (-1, -1)
 
 	def Render(self, rectangle, dc, state):
-		# _log("@Renderer_Button.Render", rectangle, dc, state, self._text, self._function)
 
 		isSelected = state == wx.dataview.DATAVIEW_CELL_SELECTED
 		useNativeRenderer = _Munge(self._node, self.useNativeRenderer, returnMunger_onFail = True)
@@ -4293,13 +4301,11 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def LeftClick(self, clickPos, cellRect, model, item, columnIndex):
-		# _log("@Renderer_Button.LeftClick", clickPos, cellRect, model, item, columnIndex)
 		if (self._enabled and self._function):
 			self._function(model.ItemToObject(item), model.olv.columns[columnIndex])
 		return True
 
 	def LeftClick_extraArg(self, clickPos, cellRect, model, item, columnIndex):
-		# _log("@Renderer_Button.LeftClick", clickPos, cellRect, model, item, columnIndex)
 		if (self._enabled and self._function):
 			self._function(model.ItemToObject(item), model.olv.columns[columnIndex], self.extraArg)
 		return True
@@ -4313,7 +4319,6 @@ class Renderer_File(wx.dataview.DataViewCustomRenderer):
 	def __init__(self, *args, message = "", directoryOnly = False, openFile = True,
 		wildcard = "All files (*.*)|*.*", changeDir = False, single = False, preview = False,
 		mustExist = False, confirm = True, ellipsize = True, **kwargs):
-		_log("@Renderer_File.__init__", kwargs)
 
 		wx.dataview.DataViewCustomRenderer.__init__(self, **kwargs)
 		self.type = "file"
@@ -4515,7 +4520,6 @@ class Renderer_CheckBox(wx.dataview.DataViewToggleRenderer):
 	"""
 
 	def __init__(self, mode = wx.dataview.DATAVIEW_CELL_ACTIVATABLE, **kwargs):
-		_log("@Renderer_CheckBox.__init__", mode, kwargs)
 
 		wx.dataview.DataViewToggleRenderer.__init__(self, mode = mode, **kwargs)
 		self.type = "check"
@@ -4545,7 +4549,6 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 	def __init__(self, minimum = 0, maximum = 100, editor = "slider",
 		color = wx.BLUE, pen = None, brush = None, 
 		mode = wx.dataview.DATAVIEW_CELL_EDITABLE, **kwargs):
-		_log("@Renderer_Progress.__init__", mode, kwargs)
 
 		wx.dataview.DataViewCustomRenderer.__init__(self, mode = mode, **kwargs)
 		self.type = "progress"
@@ -4590,7 +4593,6 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 		self.buildingKwargs["brush"] = brush
 
 	def SetValue(self, value):
-		# _log("@Renderer_Progress.SetValue", value)
 		try:
 			self.value = int(value)
 		except TypeError:
@@ -4598,15 +4600,12 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def GetValue(self):
-		# _log("@Renderer_Progress.GetValue")
 		return self.value
 
 	def GetSize(self):
-		# _log("@Renderer_Progress.GetSize")
 		return (-1, -1)
 
 	def Render(self, rectangle, dc, state):
-		# _log("@Renderer_Progress.Render", rectangle, dc, state, self.value)
 
 		pen = _Munge(self, self.pen, returnMunger_onFail = True)
 		if (pen is None):
@@ -4641,11 +4640,9 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def HasEditorCtrl(self):
-		# _log("@Renderer_Progress.HasEditorCtrl")
 		return True
 
 	def CreateEditorCtrl(self, parent, labelRect, value):
-		# _log("@Renderer_Progress.CreateEditorCtrl", parent, labelRect, value)
 
 		editor = _Munge(self, self.editor, returnMunger_onFail = True)
 		try:
@@ -4678,7 +4675,6 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 		return ctrl
 
 	def GetValueFromEditorCtrl(self, editor):
-		# _log("@Renderer_Progress.GetValueFromEditorCtrl", editor, editor.GetValue())
 		if (callable(self.minimum)):
 			minimum = self.minimum()
 		else:
@@ -4707,7 +4703,6 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 	"""
 
 	def __init__(self, choices = [], ellipsize = True, default = None, **kwargs):
-		# _log("@Renderer_Choice.__init__", choices, kwargs)
 
 		self.choices = choices
 		if (callable(choices)):
@@ -4726,7 +4721,6 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 		return super().__self_class__(**instructions)
 
 	def SetValue(self, value):
-		# _log("@Renderer_Choice.SetValue", value)
 		return super().SetValue(value[1])
 
 	def SetDefault(self, default = None):
@@ -4741,7 +4735,6 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def CreateEditorCtrl(self, parent, labelRect, value):
-		# _log("@Renderer_Choice.CreateEditorCtrl", parent, labelRect, value, self.choices)
 
 		if (callable(self.choices)):
 			choices = _Munge(value[0], self.choices, extraArgs = [value[1]], returnMunger_onFail = True)
@@ -4770,7 +4763,6 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 	"""
 
 	def __init__(self, editor = None, password = False, ellipsize = True, editRaw = True, **kwargs):
-		_log("@Renderer_Text.__init__", kwargs)
 
 		wx.dataview.DataViewTextRenderer.__init__(self, **kwargs)
 		self.type = "text"
@@ -4802,15 +4794,12 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		self.buildingKwargs["editRaw"] = editRaw
 
 	def SetValue(self, value):
-		# _log("@Renderer_Text.SetValue", value)
 		return super().SetValue(value[1])
 
 	def HasEditorCtrl(self):
-		# _log("@Renderer_Text.HasEditorCtrl")
 		return True
 
 	def CreateEditorCtrl(self, parent, labelRect, value):
-		# _log("@Renderer_Text.CreateEditorCtrl", parent, labelRect, value)
 
 		editor = _Munge(self, self.editor, returnMunger_onFail = True)
 		if (editor):
@@ -4836,7 +4825,6 @@ class Renderer_Spin(wx.dataview.DataViewSpinRenderer):
 	"""
 
 	def __init__(self, minimum = None, maximum = None, base = 10, editor = None, ellipsize = True, **kwargs):
-		_log("@Renderer_Spin.__init__", kwargs)
 
 		wx.dataview.DataViewSpinRenderer.__init__(self, 0, 1, **kwargs)
 		self.type = "spin"
@@ -4877,11 +4865,9 @@ class Renderer_Spin(wx.dataview.DataViewSpinRenderer):
 		self.buildingKwargs["base"] = base
 
 	def HasEditorCtrl(self):
-		# _log("@Renderer_Spin.HasEditorCtrl")
 		return True
 
 	def CreateEditorCtrl(self, parent, labelRect, value):
-		# _log("@Renderer_Spin.CreateEditorCtrl", parent, labelRect, value)
 
 		editor = _Munge(self, self.editor, returnMunger_onFail = True)
 		if (editor):
@@ -4907,7 +4893,6 @@ class Renderer_Bmp(wx.dataview.DataViewBitmapRenderer):
 	"""
 
 	def __init__(self, **kwargs):
-		_log("@Renderer_Bmp.__init__", kwargs)
 
 		wx.dataview.DataViewBitmapRenderer.__init__(self, **kwargs)
 		self.type = "bmp"
@@ -4927,7 +4912,6 @@ class Renderer_Icon(wx.dataview.DataViewIconTextRenderer):
 	"""
 
 	def __init__(self, icon = None, ellipsize = True, **kwargs):
-		_log("@Renderer_Icon.__init__", kwargs)
 
 		wx.dataview.DataViewIconTextRenderer.__init__(self, **kwargs)
 		self.type = "icon"
