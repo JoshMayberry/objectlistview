@@ -236,9 +236,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		else:
 			wx.dataview.DataViewCtrl.__init__(self, *args, style = style, **kwargs)
 
-		if (self.backgroundColor != None):
+		if (self.backgroundColor is not None):
 			super().SetBackgroundColour(self.backgroundColor)
-		if (self.foregroundColor != None):
+		if (self.foregroundColor is not None):
 			super().SetForegroundColour(self.foregroundColor)
 
 		if (self.groupFont is None):
@@ -428,7 +428,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		the second element will be the color if the row is even.
 		"""
 
-		if (color != None):
+		if (color is not None):
 			self.colorOverride_row[modelObject] = color
 		elif (modelObject in self.colorOverride_row):
 			del self.colorOverride_row[modelObject]
@@ -446,11 +446,11 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 
 		defn = self.GetColumn(column)
-		if (defn == None):
+		if (defn is None):
 			return
 
 		index = defn.GetIndex()
-		if (color != None):
+		if (color is not None):
 			self.colorOverride_column[index] = color
 		elif (index in self.colorOverride_column):
 			del self.colorOverride_column[index]
@@ -467,11 +467,11 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 
 		defn = self.GetColumn(column)
-		if (defn == None):
+		if (defn is None):
 			return
 
 		index = defn.GetIndex()
-		if (color != None):
+		if (color is not None):
 			self.colorOverride_cell[(modelObject, index)] = color
 		elif ((modelObject, index) in self.colorOverride_cell):
 			del self.colorOverride_cell[(modelObject, index)]
@@ -1290,7 +1290,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		item = self.model.ObjectToItem(modelObject)
 
-		if (column != None):
+		if (column is not None):
 			column = self.columns[column].column
 
 		super().EnsureVisible(item, column = column)
@@ -1406,7 +1406,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Enable automatic sorting when the user clicks on a column title
 		If *column* is None, applies to all columns.
 		"""
-		if (column != None):
+		if (column is not None):
 			self.columns[column].SetSortable(state)
 		else:
 			for column in self.columns.values():
@@ -1432,7 +1432,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 
 		column = self.GetSortingColumn()
-		if (column != None):
+		if (column is not None):
 			index = column.GetModelColumn()
 			if (returnIndex):
 				return index
@@ -1464,7 +1464,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			self.columns[index].column.SetSortOrder(ascending) #`SetSortOrder` indicates that this column is currently used for sorting the control and also sets the sorting direction
 		else:
 			item = self.GetSortingColumn()
-			if (item != None):
+			if (item is not None):
 				item.UnsetAsSortKey() #`UnsetAsSortKey` is the reverse of SetSortOrder and is called to indicate that this column is not used for sorting any longer.
 				if (unsortOnNone):
 					self.model.Cleared()
@@ -1532,10 +1532,10 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		Start an edit operation on the given cell after performing some sanity checks.
 		"""
 
-		if (objectModel == None):
+		if (objectModel is None):
 			return
 
-		if (defn.column == None):
+		if (defn.column is None):
 			return
 
 		if (not defn.IsEditable()):
@@ -1659,7 +1659,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			The parameter *clipPrefix* can change append text to the start.
 
 			The parameter *clipGroup* controls what happens if a group is copied.
-				- *clipGroup* == None: The group will be ignored
+				- *clipGroup* is None: The group will be ignored
 				- *clipGroup* == True: All items in the group will be copied
 				- *clipGroup* == False: The name of the group will be copied as a row
 
@@ -1700,7 +1700,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			nonlocal self, event, log
 
 			newEvent = self.TriggerEvent(DOLVEvent.CopyEvent, row = row, columns = [*event.columns], returnEvent = True)
-			if (newEvent.IsVetoed() or (not newEvent.columns) or (newEvent.row == None)):
+			if (newEvent.IsVetoed() or (not newEvent.columns) or (newEvent.row is None)):
 				return None, []
 
 			contents = {None: newEvent.row}
@@ -1715,7 +1715,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 			pass
 
-			# if (clipGroup != None):
+			# if (clipGroup is not None):
 			# 	log.append({None: group})
 
 		def getSimpleText():
@@ -1728,8 +1728,8 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 					lines.append(f"\n{row.title}")
 				else:
 					_row, columns, _text = logRow(row)
-					if (_row != None):
-						if (_text != None):
+					if (_row is not None):
+						if (_text is not None):
 							lines.append(_text)
 						else:
 							lines.append(f"{self.clipColumnSpacer or ''}".join((column.GetStringValue(_row) for column in columns)))
@@ -1743,16 +1743,16 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			nonlocal self
 
 			_row, columns, _text = logRow(row)
-			if (_row == None):
+			if (_row is None):
 				return ""
-			if (_text != None):
+			if (_text is not None):
 				return _text
 
 			text = f"{_Munge(row, self.clipRowPrefix, returnMunger_onFail = True)}"
 
 			previousItem = None
 			for column in columns:
-				if (previousItem != None):
+				if (previousItem is not None):
 					text += f"{_Munge(_row, self.clipColumnSpacer, extraArgs = [previousItem, column], returnMunger_onFail = True)}"
 				text += column.GetStringValue(_row)
 				previousItem = column
@@ -1784,8 +1784,8 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 			previousItem = None
 			for item, line in lines:
-				if (previousItem != None):
-					if (isinstance(item, DataListGroup) and (self.clipGroupSpacer != None)):
+				if (previousItem is not None):
+					if (isinstance(item, DataListGroup) and (self.clipGroupSpacer is not None)):
 						spacer = self.clipGroupSpacer
 					else:
 						spacer = self.clipRowSpacer or ''
@@ -1801,7 +1801,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		#Make a text version of the values
 		lines = []
-		if (event.text != None):
+		if (event.text is not None):
 			text = event.text
 		elif (self.clipSimple):
 			text = getSimpleText()
@@ -1813,7 +1813,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 					lines.append((row, getRowText(row)))
 				else:
 					clipGroup = _Munge(row, self.clipGroup, returnMunger_onFail = True)
-					if (clipGroup != None):
+					if (clipGroup is not None):
 						lines.append((row, getGroupText(row, clipGroup)))
 			text += joinLines(lines)
 			text += f"{_Munge(event.rows, self.clipSuffix, returnMunger_onFail = True)}"
@@ -1925,7 +1925,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 			while True:
 				row = self.GetNext(row, wrap = False)
-				if (row == None):
+				if (row is None):
 					break
 				yield row
 
@@ -1958,7 +1958,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 						tryValue(row, self.GetPrimaryColumn(), columns[0])
 					continue
 
-				if ((not entireRow) and (columnClicked != None)):
+				if ((not entireRow) and (columnClicked is not None)):
 					index = columnClicked.GetIndex()
 					if (index in columns):
 						tryValue(row, self.GetColumn(index), columns[index])
@@ -1979,7 +1979,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		def pasteCell(row, value):
 			nonlocal self, columnClicked
 
-			if (columnClicked == None):
+			if (columnClicked is None):
 				return
 			
 			tryValue(row, columnClicked, value)
@@ -1992,7 +1992,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				event = self.TriggerEvent(DOLVEvent.PasteEvent, row = row, column = column, value = value, editCanceled = False, returnEvent = True)
 				if (event.IsVetoed()):
 					return
-				if ((event.row == None) or (event.column == None)):
+				if ((event.row is None) or (event.column is None)):
 					return
 
 				_row = self.model.ObjectToItem(event.row)
@@ -2035,7 +2035,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				except StopIteration:
 					break
 
-				if ((not entireRow) and (columnClicked != None)):
+				if ((not entireRow) and (columnClicked is not None)):
 					index = columnClicked.GetIndex()
 					if (index in line):
 						tryValue(row, columnClicked, line[index])
@@ -2072,7 +2072,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 
 		event = self.TriggerEvent(DOLVEvent.UndoTrackEvent, action = action, type = action.GetType(), returnEvent = True)
-		if (event.IsVetoed() or (event.action == None)):
+		if (event.IsVetoed() or (event.action is None)):
 			return
 
 		if (self.redoHistory):
@@ -2196,14 +2196,14 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		
 		if (self.key_copy):
 			if ((key == wx.WXK_CONTROL_C)):
-				if (self.key_copyEntireRow != None):
+				if (self.key_copyEntireRow is not None):
 					self.CopySelectionToClipboard(entireRow = self.key_copyEntireRow)
 				else:
 					self.CopySelectionToClipboard(entireRow = event.ShiftDown())
 				return
 		if (self.key_paste):
 			if ((key == wx.WXK_CONTROL_V)):
-				if (self.key_pasteEntireRow != None):
+				if (self.key_pasteEntireRow is not None):
 					self.PasteClipboardToSelection(entireRow = self.key_pasteEntireRow)
 				else:
 					self.PasteClipboardToSelection(entireRow = event.ShiftDown())
@@ -2404,7 +2404,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		answer = self.TriggerEvent(eventTo, **info)
 		if (answer):
 			eventFrom.Skip()
-		elif (answer != None):
+		elif (answer is not None):
 			eventFrom.Veto()
 		return answer, info
 
@@ -2444,7 +2444,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			rowInfo = self._getRelayInfo(relayEvent)
 
 			#Check if the user clicked on empty space instead of on an item
-			if (rowInfo["column"] != None):
+			if (rowInfo["column"] is not None):
 				self.contextMenu.SetRow(rowInfo["row"])
 				self.contextMenu.SetColumn(rowInfo["column"])
 				if (self.contextMenu.Show()):
@@ -2463,7 +2463,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			rowInfo = self._getRelayInfo(relayEvent)
 
 			#Check if the user clicked on empty space instead of on an item
-			if (rowInfo["column"] != None):
+			if (rowInfo["column"] is not None):
 				self.columnContextMenu.SetColumn(rowInfo["column"])
 				if (self.columnContextMenu.Show()):
 					relayEvent.Skip()
@@ -2502,25 +2502,25 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	def _RelayEditCellFinishing(self, relayEvent):
 		info = self._getRelayInfo(relayEvent)
 		column = info["column"]
-		if (column != None):
+		if (column is not None):
 			row = info["row"]
 			oldValue = column.GetValue(row)
 
 		self._RelayEvent(relayEvent, DOLVEvent.EditCellFinishingEvent, info = info)
 		
-		if ((column != None) and (relayEvent.IsAllowed())):
+		if ((column is not None) and (relayEvent.IsAllowed())):
 			self._TrackEdit(row, column, oldValue, info["value"])
 
 	def _RelayEditCellFinished(self, relayEvent):
 		info = self._getRelayInfo(relayEvent)
 		column = info["column"]
-		if (column != None):
+		if (column is not None):
 			row = info["row"]
 			oldValue = column.GetValue(row)
 
 		self._RelayEvent(relayEvent, DOLVEvent.EditCellFinishedEvent, info = info)
 
-		if (self._undo_listenForCheckBox and (column != None) and (relayEvent.IsAllowed()) and 
+		if (self._undo_listenForCheckBox and (column is not None) and (relayEvent.IsAllowed()) and 
 			(isinstance(column.renderer, (wx.dataview.DataViewToggleRenderer, Renderer_CheckBox)))):
 
 			value = column.GetValue(row)
@@ -2674,7 +2674,7 @@ class DataColumnDefn(object):
 		Change the width of the column.
 		If 'width' is None, it will auto-size.
 		"""
-		if (width == None):
+		if (width is None):
 			width = wx.LIST_AUTOSIZE
 
 		return self.column.SetWidth(_Munge(self, width, returnMunger_onFail = True))
@@ -2931,32 +2931,32 @@ class ContextMenu(object):
 		self.idCatalogue[item_id] = text
 
 		#Setup Type
-		if (check != None):
+		if (check is not None):
 			self.checks[item_id] = check
 
-		if (radio != None):
+		if (radio is not None):
 			self.radios[item_id] = radio
 
 		#Setup Conditional
-		if (row != None):
+		if (row is not None):
 			self.exclusive_x[item_id] = set()
 			for _row in row if (isinstance(row, (list, tuple, set, types.GeneratorType))) else [row]:
 				self.exclusive_x[item_id].add(_row)
 
-		if (column != None):
+		if (column is not None):
 			self.exclusive_y[item_id] = set()
 			for _column in column if (isinstance(column, (list, tuple, set, types.GeneratorType))) else [column]:
 				if (not isinstance(_column, DataColumnDefn)):
 					_column = self.olv.columns[_column]
 				self.exclusive_y[item_id].add(_column)
 		
-		if (condition != None):
+		if (condition is not None):
 			self.conditions[item_id] = condition
 
 		#Bind Functions
 		self.olv.Bind(wx.EVT_MENU, self._handleItemClicked, id = item_id)
 
-		if (function != None):
+		if (function is not None):
 			self.functions[item_id] = function
 
 	def _handleItemClicked(self, event):
@@ -3041,7 +3041,7 @@ class UndoEdit():
 		return self
 
 	def __exit__(self, exc_type, exc_value, traceback):
-		if (traceback != None):
+		if (traceback is not None):
 			return False
 
 	def GetType(self):
@@ -3061,7 +3061,7 @@ class UndoEdit():
 		if (not _row.IsOk()):
 			print(f"Row {event.row.__repr__()} is not on the table anymore.")
 			return False
-		if (event.column == None):
+		if (event.column is None):
 			print(f"Column {self.column.__repr__()} is not on the table anymore.")
 			return False
 
@@ -3088,7 +3088,7 @@ class UndoPaste():
 		return self
 
 	def __exit__(self, exc_type, exc_value, traceback):
-		if (traceback != None):
+		if (traceback is not None):
 			return False
 
 	def GetType(self):
@@ -3114,7 +3114,7 @@ class UndoPaste():
 						print(f"Row {row.__repr__()} is not on the table anymore.")
 						success = False
 						continue
-					if (event.column == None):
+					if (event.column is None):
 						print(f"Column {column.__repr__()} is not on the table anymore.")
 						success = False
 						continue
@@ -3323,7 +3323,7 @@ def _drawText(dc, rectangle = wx.Rect(0, 0, 100, 100), text = "", isSelected = F
 	oldColor = dc.GetTextForeground()
 	oldFont = dc.GetFont()
 	try:
-		if (color != None):
+		if (color is not None):
 			color = tuple(min(255, max(0, item)) for item in color) #Ensure numbers are between 0 and 255
 		else:
 			if (not isEnabled):
@@ -3335,18 +3335,18 @@ def _drawText(dc, rectangle = wx.Rect(0, 0, 100, 100), text = "", isSelected = F
 				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNTEXT)
 		dc.SetTextForeground(color)
 
-		if (font != None):
+		if (font is not None):
 			dc.SetFont(font)
 
 		if (wrap):
 			text = wx.lib.wordwrap.wordwrap(text, rectangle.width, dc)
 
-		if (x_align == None):
+		if (x_align is None):
 			x_align = 0
 		else:
 			x_align = {"l": wx.ALIGN_LEFT, "r": wx.ALIGN_RIGHT, "c": wx.ALIGN_CENTER_HORIZONTAL}[x_align[0].lower()]
 
-		if (y_align == None):
+		if (y_align is None):
 			y_align = wx.ALIGN_CENTER_VERTICAL
 		else:
 			y_align = {"t": wx.ALIGN_TOP, "b": wx.ALIGN_BOTTOM, "c": wx.ALIGN_CENTER_VERTICAL}[y_align[0].lower()]
@@ -3366,7 +3366,7 @@ def _drawBackground(dc, rectangle, isSelected, color = None):
 	oldBrush = dc.GetBrush()
 
 	try:
-		if (color != None):
+		if (color is not None):
 			color = tuple(min(255, max(0, item)) for item in color) #Ensure numbers are between 0 and 255
 		else:
 			if (isSelected):
@@ -3409,7 +3409,7 @@ def _drawButton(dc, rectangle, isSelected, fitTo = None, radius = 1, borderWidth
 	oldBrush = dc.GetBrush()
 
 	try:
-		if (color != None):
+		if (color is not None):
 			color = tuple(min(255, max(0, item)) for item in color) #Ensure numbers are between 0 and 255
 		else:
 			if (isSelected):
@@ -3418,26 +3418,26 @@ def _drawButton(dc, rectangle, isSelected, fitTo = None, radius = 1, borderWidth
 				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE)
 		dc.SetBrush(wx.Brush(color, style = wx.SOLID))
 
-		if (borderColor != None):
+		if (borderColor is not None):
 			borderColor = tuple(min(255, max(0, item)) for item in borderColor) #Ensure numbers are between 0 and 255
 		else:
 			borderColor = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNSHADOW)
 		dc.SetPen(wx.Pen(borderColor, width = borderWidth, style = wx.SOLID))
 		# dc.SetPen(wx.TRANSPARENT_PEN)
 
-		if (fitTo == None):
+		if (fitTo is None):
 			width = rectangle.width
 			height = rectangle.height
 		else:
 			width, height = dc.GetTextExtent(fitTo)
 
-		if ((x_align == None) and (y_align == None)):
+		if ((x_align is None) and (y_align is None)):
 			x_align = 0
 			y_align = 0
 		else:
-			if (x_align == None):
+			if (x_align is None):
 				x_align = "center"
-			elif (y_align == None):
+			elif (y_align is None):
 				y_align = "center"
 
 			if (x_align.lower()[0] == "l"):
@@ -3506,7 +3506,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			try:
 				attribute.SetBackgroundColour(color)
 			except TypeError:
-				if (odd == None):
+				if (odd is None):
 					odd = (node not in self.colorCatalogue) or (self.colorCatalogue[node] is self.olv.oddRowsBackColor)
 				if (odd):
 					attribute.SetBackgroundColour(color[0])
@@ -3527,7 +3527,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 						print(error)
 						color = None
 
-					if (color != None):
+					if (color is not None):
 						return applyColor(color)
 
 				attribute.SetColour(self.olv.groupFont[2])
@@ -3540,7 +3540,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 					print(error)
 					color = None
 
-				if (color != None):
+				if (color is not None):
 					return applyColor(color)
 
 			if ((node, column) in self.olv.colorOverride_cell):
@@ -3552,7 +3552,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			if (node in self.olv.colorOverride_row):
 				return applyColor(self.olv.colorOverride_row[node])
 			
-			if (self.sortCounter != None):
+			if (self.sortCounter is not None):
 				if (node not in self.sort_colorCatalogue):
 					if (self.sortCounter % 2):
 						self.sort_colorCatalogue[node] = self.olv.evenRowsBackColor
@@ -3587,7 +3587,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		def applyGroupColor(group, rows):
 			if (self.olv.useAlternateBackColors and self.olv.InReportView()):
-				if (self.olv.groupBackColor != None):
+				if (self.olv.groupBackColor is not None):
 					self.colorCatalogue[group] = self.olv.groupBackColor
 				applyRowColor(rows)
 
@@ -3781,9 +3781,9 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		
 		elif (isinstance(defn.renderer, (wx.dataview.DataViewIconTextRenderer, Renderer_Icon))):
 			icon = _Munge(node, defn.renderer.icon, extraArgs = [defn], returnMunger_onFail = True)
-			if (icon == None):
+			if (icon is None):
 				icon = wx.Icon(wx.NullBitmap)
-			if (value == None):
+			if (value is None):
 				value = ""
 			return wx.dataview.DataViewIconText(text = str(value), icon = icon)
 
@@ -4031,13 +4031,13 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def SelectCompare(self):
 		"""Different case functions have been created to speed up calls to the function Compare()."""
 
-		if (self.olv.compareFunction == None):
-			if (self.olv.groupCompareFunction == None):
+		if (self.olv.compareFunction is None):
+			if (self.olv.groupCompareFunction is None):
 				self.Compare = self.Compare_None
 			else:
 				self.Compare = self.Compare_Group
 		else:
-			if (self.olv.groupCompareFunction == None):
+			if (self.olv.groupCompareFunction is None):
 				self.Compare = self.Compare_Row
 			else:
 				self.Compare = self.Compare_GroupRow
@@ -4069,7 +4069,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		node = self.ItemToObject(item1)
 		if (not isinstance(node, DataListGroup)):
 			answer = self.olv.compareFunction(node, self.ItemToObject(item2), self.olv.columns[column], ascending)
-			if (answer != None):
+			if (answer is not None):
 				return answer
 		return self.Compare_None(item1, item2, column, ascending)
 
@@ -4079,7 +4079,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		node = self.ItemToObject(item1)
 		if (isinstance(node, DataListGroup)):
 			answer = self.olv.groupCompareFunction(node, self.ItemToObject(item2), self.olv.columns[column], ascending)
-			if (answer != None):
+			if (answer is not None):
 				return answer
 		return self.Compare_None(item1, item2, column, ascending)
 
@@ -4091,7 +4091,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 			answer = self.olv.groupCompareFunction(node, self.ItemToObject(item2), self.olv.columns[column], ascending)
 		else:
 			answer = self.olv.compareFunction(node, self.ItemToObject(item2), self.olv.columns[column], ascending)
-		if (answer != None):
+		if (answer is not None):
 			return answer
 		return self.Compare_None(item1, item2, column, ascending)
 
@@ -4159,19 +4159,19 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 	"""
 	Depending on what *text* and *function* initially are will determine how 
 	the value returned by by *valueGetter* for the assigned *ColumnDefn* is used.
-		- *text* == None and *function* == None: The value should be a list, where the first element is 
+		- *text* is None and *function* is None: The value should be a list, where the first element is 
 			the text to display and the second element is the function to run.
-		- *text* != None and *function* == None: The value should be a function that returns a function.
+		- *text* is not None and *function* is None: The value should be a function that returns a function.
 			If it is only a function, _Munge will run it.
 			For simplicity, you can use `lambda: yourFunction`.
-		- *text* == None and *function* != None: The value returned should be the text to display.
-		- *text* != None and *function* != None: The value returned will be passed to *function* as
+		- *text* is None and *function* is not None: The value returned should be the text to display.
+		- *text* is not None and *function* is not None: The value returned will be passed to *function* as
 			a third parameter.
 
 	In all cases, the function should accept the following parameters: objectModel, columnIndex
 
-	- *enabled* != None: Determines if the button is enabled or not. 
-		If *enabled* == None, if the column is editable or not will be used for this.
+	- *enabled* is not None: Determines if the button is enabled or not. 
+		If *enabled* is None, if the column is editable or not will be used for this.
 
 	The Button can be drawn with the wxNativeRenderer if *useNativeRenderer* is True.
 	If it is None, Only text will be drawn.
@@ -4182,13 +4182,13 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self.type = "button"
 		self.buildingKwargs = {**kwargs, "text": text, "function": function, "enabled": enabled, "useNativeRenderer": useNativeRenderer, "mode": mode}
 		
-		if (text == None):
-			if (function == None):
+		if (text is None):
+			if (function is None):
 				self.SetValue = self.SetValue_both
 			else:
 				self.SetValue = self.SetValue_text
 		else:
-			if (function == None):
+			if (function is None):
 				self.SetValue = self.SetValue_function
 			else:
 				self.LeftClick = self.LeftClick_extraArg
@@ -4218,7 +4218,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self._text = value[2][0]
 		self._applyFunction(value[2][1])
 
-		if (self.enabled != None):
+		if (self.enabled is not None):
 			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
 		else:
 			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
@@ -4230,7 +4230,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self._applyFunction(value[2])
 		self._text = _Munge(self._node, self.text, returnMunger_onFail = True)
 
-		if (self.enabled != None):
+		if (self.enabled is not None):
 			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
 		else:
 			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
@@ -4242,7 +4242,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self._applyFunction(_Munge(self._node, self.function, returnMunger_onFail = True))
 		self._text = value[2]
 
-		if (self.enabled != None):
+		if (self.enabled is not None):
 			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
 		else:
 			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
@@ -4255,7 +4255,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self._text = _Munge(self._node, self.text, returnMunger_onFail = True)
 		self.extraArg = value[2]
 
-		if (self.enabled != None):
+		if (self.enabled is not None):
 			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
 		else:
 			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
@@ -4290,14 +4290,14 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 			style = "|".join(style)
 
 			wx.RendererNative.Get().DrawPushButton(self.GetOwner().GetOwner(), dc, rectangle, eval(style, {'__builtins__': None, "wx": wx}, {}))
-		elif (useNativeRenderer != None):
+		elif (useNativeRenderer is not None):
 			rectangle.Deflate(2, 2)
 			_drawButton(dc, rectangle, isSelected)
 			rectangle.Deflate(2, 0)
 
 		if (self._text):
 			_drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, x_align = "left")
-			# _drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, x_align = "center" if (useNativeRenderer != None) else "left")
+			# _drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, x_align = "center" if (useNativeRenderer is not None) else "left")
 		return True
 
 	def LeftClick(self, clickPos, cellRect, model, item, columnIndex):
@@ -4696,7 +4696,7 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 	*choices* can now be a function that returns a list of choices.
 
 	*default* is what selection the editor defaults to. Can be an integer or string that is in *choices*.
-	If *default* == None: Will try using what was in the cell (may not work with formatted text)
+	If *default* is None: Will try using what was in the cell (may not work with formatted text)
 	
 	*default* and *choices* can also be callable functions 
 	that accept the following args: unformatted_value, formatted_value
@@ -4742,7 +4742,7 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 			choices = self.choices
 
 		default = _Munge(value[0], self.default, extraArgs = [value[1]], returnMunger_onFail = True)
-		if (default == None):
+		if (default is None):
 			default = value[1]
 
 		window = wx.Choice(parent, id = wx.ID_ANY, pos = labelRect.GetTopLeft(), size = labelRect.GetSize(), choices = choices)
@@ -4884,7 +4884,7 @@ class Renderer_Spin(wx.dataview.DataViewSpinRenderer):
 		ctrl = wx.SpinCtrl(parent, pos = labelRect.Position, size = labelRect.Size, min = minimum, max = maximum, initial = value)
 
 		base = _Munge(self, self.base, returnMunger_onFail = True)
-		if ((base != None) and (base != 10)):
+		if ((base is not None) and (base != 10)):
 			ctrl.SetBase(base)
 		return ctrl
 

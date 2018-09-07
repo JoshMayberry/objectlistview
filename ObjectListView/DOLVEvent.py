@@ -460,7 +460,7 @@ class CopyingEvent(VetoableEvent):
 	def SetText(self, text = None):
 		"""
 		Set the text to be put on the clipboard yourself.
-		If *text* == None, the program will determine what the clipboard should look like.
+		If *text* is None, the program will determine what the clipboard should look like.
 		"""
 		self.text = text
 
@@ -499,7 +499,7 @@ class CopyEvent(VetoableEvent):
 	def SetText(self, text = None):
 		"""
 		Set the text to be put on the clipboard yourself.
-		If *text* == None, the program will determine what the clipboard should look like.
+		If *text* is None, the program will determine what the clipboard should look like.
 		"""
 		self.text = text
 
