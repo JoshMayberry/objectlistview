@@ -101,7 +101,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.colorOverride_groupFunction = None
 		self.lastSelected = None
 
-		useWeakRefs 			= kwargs.pop("useWeakRefs", False)
+		useWeakRefs 			= kwargs.pop("useWeakRefs", True)
 		self.noHeader 			= kwargs.pop("noHeader", False)
 		self.rowFormatter 		= kwargs.pop("rowFormatter", None)
 		self.singleSelect 		= kwargs.pop("singleSelect", True)
@@ -288,9 +288,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	# def on_expand(self, event):
 		#FOR DEBUGGING 
 	# 	item = event.GetItem()
-	# 	print("@5.1", item.IsOk())
+	# 	print("@on_expand.1", item.IsOk())
 	# 	super().Expand(item)
-	# 	print("@5.2", self.IsExpanded(item), self.model.IsContainer(item))
+	# 	print("@on_expand.2", self.IsExpanded(item), self.model.IsContainer(item))
 	# 	event.Skip()
 
 	# --------------------------------------------------------------#000000#FFFFFF
@@ -1056,7 +1056,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			try:
 				self.alwaysGroupByColumnIndex = [key for key, value in self.columns.items() if (value is column)][0]
 			except IndexError as error:
-				print(error)
+				print("@SetAlwaysGroupByColumn", error)
 				self.alwaysGroupByColumnIndex = -1
 		else:
 			self.alwaysGroupByColumnIndex = column
@@ -1972,7 +1972,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 						try:
 							value = ast.literal_eval(value)
 						except Exception as error:
-							print(f"Malformed paste string for column {column.title} as {value} to replace {column.GetValue(row)}")
+							print("@pasteSimple", f"Malformed paste string for column {column.title} as {value} to replace {column.GetValue(row)}")
 							continue
 					column.SetValue(row, value)
 
@@ -2011,7 +2011,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 					self.model.ChangeValue(event.value, _row, _column)
 					self.model.GetValue(_row, _column)
 				except Exception as error:
-					print(error)
+					print("@tryValue", error)
 					self.model.ChangeValue(oldValue, _row, _column)
 				else:
 					logApplication(event.row, event.column, oldValue, event.value)
@@ -2335,6 +2335,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			self.overlayEmptyListMsg.Reset()
 			
 			dc = wx.ClientDC(item)
+			dc.Clear()
 			odc = wx.DCOverlay(self.overlayEmptyListMsg, dc)
 			odc.Clear()
 
@@ -2345,6 +2346,8 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			_drawText(dc, text = message, rectangle = wx.Rect(0, 0, size[0], size[1]), x_align = "center", color = wx.LIGHT_GREY, font = self.emptyListFont, wrap = True)
 
 			del odc  # Make sure the odc is destroyed before the dc is.
+
+		####################################################
 
 		if (not self.modelObjects):
 			wx.CallAfter(drawEmptyList, event.GetEventObject(), self.emptyListMsg)
@@ -3059,10 +3062,10 @@ class UndoEdit():
 
 		_row = self.olv.model.ObjectToItem(event.row)
 		if (not _row.IsOk()):
-			print(f"Row {event.row.__repr__()} is not on the table anymore.")
+			print("@UndoEdit.undo", f"Row {event.row.__repr__()} is not on the table anymore.")
 			return False
 		if (event.column is None):
-			print(f"Column {self.column.__repr__()} is not on the table anymore.")
+			print("@UndoEdit.undo", f"Column {self.column.__repr__()} is not on the table anymore.")
 			return False
 
 		if (event.wasHandled):
@@ -3111,11 +3114,11 @@ class UndoPaste():
 
 					_row = self.olv.model.ObjectToItem(event.row)
 					if (not _row.IsOk()):
-						print(f"Row {row.__repr__()} is not on the table anymore.")
+						print("@UndoPaste.undo", f"Row {row.__repr__()} is not on the table anymore.")
 						success = False
 						continue
 					if (event.column is None):
-						print(f"Column {column.__repr__()} is not on the table anymore.")
+						print("@UndoPaste.undo", f"Column {column.__repr__()} is not on the table anymore.")
 						success = False
 						continue
 
@@ -3269,16 +3272,16 @@ def _Munge(modelObject, munger, extraArgs = [], returnMunger_onFail = False):
 		pass
 
 	# Use the callable directly, if possible.
-	# In accordance with Guido's rules for Python 3, we just call it and catch the exception
-	if (extraArgs):
-		try:
-			return munger(modelObject, *extraArgs)
-		except TypeError:
-			pass
-	try:
+	# Try/except can mask errors from the user's callable function
+	if (callable(munger)):
+		if (extraArgs):
+			try:
+				return munger(modelObject, *extraArgs)
+			except TypeError:
+				pass
+
+		#Allow the error to propigate if one occurs
 		return munger(modelObject)
-	except TypeError:
-		pass
 
 	# Try dictionary-like indexing
 	try:
@@ -3483,6 +3486,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		self.rootLength = 0 #How many children are shown on the top level of the model
 		self.sortCounter = None
+		self.useWeakRefs = useWeakRefs
 		self.sort_colorCatalogue = {}
 
 		self.SelectCompare()
@@ -3493,8 +3497,8 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# so any Python object can be used as data nodes. If the data nodes
 		# are weak-referencable then the objmapper can use a
 		# WeakValueDictionary instead.
-		# self.UseWeakRefs(useWeakRefs)
-		self.UseWeakRefs(True)
+		self.UseWeakRefs(useWeakRefs)
+		# self.UseWeakRefs(True)
 
 	def GetAttr(self, item, column, attribute):
 		#Override this to indicate that the item has special font attributes.
@@ -3524,7 +3528,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 					try:
 						color = self.olv.colorOverride_groupFunction(node, self.olv.columns[column])
 					except Exception as error:
-						print(error)
+						print("@applyColor.1", error)
 						color = None
 
 					if (color is not None):
@@ -3537,7 +3541,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				try:
 					color = self.olv.colorOverride_function(node, self.olv.columns[column])
 				except Exception as error:
-					print(error)
+					print("@applyColor.2", error)
 					color = None
 
 				if (color is not None):
@@ -3764,7 +3768,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		if (raw):
 			return value
 
-
 		if (isinstance(defn.renderer, (Renderer_Text, Renderer_Choice))):
 			#Account for formatter
 			return (value, _StringToValue(value, defn.stringConverter, extraArgs = [defn]))
@@ -3796,6 +3799,9 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		elif (isinstance(defn.renderer, Renderer_Button)):
 			return [node, defn, value]
+
+		if (value is None):
+			value = ""
 		return value
 
 	def SetValue(self, value, item, column):
@@ -4735,7 +4741,6 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def CreateEditorCtrl(self, parent, labelRect, value):
-
 		if (callable(self.choices)):
 			choices = _Munge(value[0], self.choices, extraArgs = [value[1]], returnMunger_onFail = True)
 		else:
