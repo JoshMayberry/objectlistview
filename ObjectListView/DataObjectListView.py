@@ -1,42 +1,4 @@
-# -*- coding: utf-8 -*-
-#----------------------------------------------------------------------------
-# Name:         ObjectListView.py
-# Author:       Phillip Piper
-# Created:      29 February 2008
-# Copyright:    (c) 2008 Phillip Piper
-# License:      wxWindows license
-#----------------------------------------------------------------------------
-
-"""
-An `ObjectListView` provides a more convienent and powerful interface to a ListCtrl.
-
-The major features of an `ObjectListView` are:
-
-	* Automatically transforms a collection of model objects into a ListCtrl.
-	* Automatically sorts rows by their data type.
-	* Easily edits the values shown in the ListCtrl.
-	* Supports all ListCtrl views (report, list, large and small icons).
-	* Columns can be fixed-width, have a minimum and/or maximum width, or be space-filling.
-	* Displays a "list is empty" message when the list is empty (obviously).
-	* Supports custom formatting of rows
-	* Supports alternate rows background colors.
-	* Supports checkbox columns
-	* Supports searching (by typing) on the sorted column -- even on virtual lists.
-	* Supports filtering of rows
-	* The `FastObjectListView` version can build a list of 10,000 objects in less than 0.1 seconds.
-	* The `VirtualObjectListView` version supports millions of rows through ListCtrl's virtual mode.
-	* The `GroupListView` version partitions it's rows into collapsible groups.
-
-An `ObjectListView` works in a declarative manner: the programmer configures how it should
-work, then gives it the list of objects to display. The primary configuration is in the
-definitions of the columns. Columns are configured to know which aspect of their model
-they should display, how it should be formatted, and even how new values should be written
-back into the model. See `ColumnDefn` for more information.
-
-"""
-
-__author__ = "Phillip Piper"
-__date__ = "18 June 2008"
+__author__ = "Phillip Piper and Joshua Mayberry"
 
 import os
 import ast
@@ -1623,12 +1585,32 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	#-------------------------------------------------------------------------
 	# Copy / Paste
 
-	def CopyObjectsToClipboard(self, modelObjects, columns):
+	def CopyObjectsToClipboard(self, modelObjects = None, columns = None, **kwargs):
 		"""
 		Put a textual representation of the given objects onto the clipboard.
 
 		*modelObjects* should be a list of model objects to copy.
+		If *modelObjects* is None, all rows will be copied.
+
 		*columns* should be a list of the columns to copy values from.
+		If *columns* is None, all columns will be copied.
+
+		The following parameters can be overridden by providing them as a kwarg:
+			clipSimple
+			clipKeepAfterClose
+
+			clipSuffix
+			clipPrefix
+			clipColumnSpacer
+
+			clipRowPrefix
+			clipRowSuffix
+			clipRowSpacer
+
+			clipGroup
+			clipGroupPrefix
+			clipGroupSuffix
+			clipGroupSpacer
 
 		If the parameter *clipKeepAfterClose* == True, the copied data will be kept
 		after the program is closed (this may not work on Mac and Linux).
@@ -1687,6 +1669,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			row item itself. Each row is added to a list.
 		"""
 
+		columns = columns or self.columns.values()
+		modelObjects = modelObjects or self.modelObjects
+
 		#Tell the world that copying will happen
 		event = self.TriggerEvent(DOLVEvent.CopyingEvent, rows = modelObjects, columns = columns, returnEvent = True)
 		if (event.IsVetoed()):
@@ -1695,11 +1680,26 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			return
 
 		log = []
+		clipSimple = kwargs.pop("clipSimple", self.clipSimple)
+		clipKeepAfterClose = kwargs.pop("clipKeepAfterClose", self.clipKeepAfterClose)
+		
+		clipSuffix = kwargs.pop("clipSuffix", self.clipSuffix)
+		clipPrefix = kwargs.pop("clipPrefix", self.clipPrefix)
+		clipColumnSpacer = kwargs.pop("clipColumnSpacer", self.clipColumnSpacer)
+
+		clipRowPrefix = kwargs.pop("clipRowPrefix", self.clipRowPrefix)
+		clipRowSuffix = kwargs.pop("clipRowSuffix", self.clipRowSuffix)
+		clipRowSpacer = kwargs.pop("clipRowSpacer", self.clipRowSpacer)
+
+		clipGroup = kwargs.pop("clipGroup", self.clipGroup)
+		clipGroupPrefix = kwargs.pop("clipGroupPrefix", self.clipGroupPrefix)
+		clipGroupSuffix = kwargs.pop("clipGroupSuffix", self.clipGroupSuffix)
+		clipGroupSpacer = kwargs.pop("clipGroupSpacer", self.clipGroupSpacer)
 
 		def logRow(row):
 			nonlocal self, event, log
 
-			newEvent = self.TriggerEvent(DOLVEvent.CopyEvent, row = row, columns = [*event.columns], returnEvent = True)
+			newEvent = self.TriggerEvent(DOLVEvent.CopyEvent, row = row, columns = (*event.columns,), returnEvent = True)
 			if (newEvent.IsVetoed() or (not newEvent.columns) or (newEvent.row is None)):
 				return None, []
 
@@ -1710,12 +1710,12 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 			return newEvent.row, newEvent.columns, newEvent.text
 
-		def logGroup(group, clipGroup = None):
+		def logGroup(group, _clipGroup = None):
 			nonlocal self, log
 
 			pass
 
-			# if (clipGroup is not None):
+			# if (_clipGroup is not None):
 			# 	log.append({None: group})
 
 		def getSimpleText():
@@ -1724,7 +1724,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			lines = []
 			for row in event.rows:
 				if (isinstance(row, DataListGroup)):
-					logGroup(row, clipGroup = self.clipGroup)
+					logGroup(row, clipGroup = clipGroup)
 					lines.append(f"\n{row.title}")
 				else:
 					_row, columns, _text = logRow(row)
@@ -1732,11 +1732,11 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 						if (_text is not None):
 							lines.append(_text)
 						else:
-							lines.append(f"{self.clipColumnSpacer or ''}".join((column.GetStringValue(_row) for column in columns)))
+							lines.append(f"{clipColumnSpacer or ''}".join((column.GetStringValue(_row) for column in columns)))
 
-			text = f"{self.clipPrefix or ''}"
-			text += f"{self.clipRowSpacer or ''}".join(lines)
-			text += f"{self.clipSuffix or ''}"
+			text = f"{clipPrefix or ''}"
+			text += f"{clipRowSpacer or ''}".join(lines)
+			text += f"{clipSuffix or ''}"
 			return text
 
 		def getRowText(row):
@@ -1748,25 +1748,25 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			if (_text is not None):
 				return _text
 
-			text = f"{_Munge(row, self.clipRowPrefix, returnMunger_onFail = True)}"
+			text = f"{_Munge(row, clipRowPrefix, returnMunger_onFail = True)}"
 
 			previousItem = None
 			for column in columns:
 				if (previousItem is not None):
-					text += f"{_Munge(_row, self.clipColumnSpacer, extraArgs = [previousItem, column], returnMunger_onFail = True)}"
+					text += f"{_Munge(_row, clipColumnSpacer, extraArgs = [previousItem, column], returnMunger_onFail = True)}"
 				text += column.GetStringValue(_row)
 				previousItem = column
 
-			text += f"{_Munge(_row, self.clipRowSuffix, returnMunger_onFail = True)}"
+			text += f"{_Munge(_row, clipRowSuffix, returnMunger_onFail = True)}"
 			return text
 
-		def getGroupText(group, clipGroup):
+		def getGroupText(group, _clipGroup):
 			nonlocal self
 
-			logGroup(group, clipGroup = clipGroup)
-			text = f"{_Munge(group, self.clipGroupPrefix, returnMunger_onFail = True)}"
+			logGroup(group, clipGroup = _clipGroup)
+			text = f"{_Munge(group, clipGroupPrefix, returnMunger_onFail = True)}"
 
-			if (not clipGroup):
+			if (not _clipGroup):
 				text += f"{group.title}"
 			else:
 				lines = []
@@ -1774,7 +1774,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 					lines.append((row, getRowText(row)))
 				text += joinLines(lines)
 
-			text += f"{_Munge(group, self.clipGroupSuffix, returnMunger_onFail = True)}"
+			text += f"{_Munge(group, clipGroupSuffix, returnMunger_onFail = True)}"
 			return text
 
 		def joinLines(lines):
@@ -1785,10 +1785,10 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			previousItem = None
 			for item, line in lines:
 				if (previousItem is not None):
-					if (isinstance(item, DataListGroup) and (self.clipGroupSpacer is not None)):
-						spacer = self.clipGroupSpacer
+					if (isinstance(item, DataListGroup) and (clipGroupSpacer is not None)):
+						spacer = clipGroupSpacer
 					else:
-						spacer = self.clipRowSpacer or ''
+						spacer = clipRowSpacer or ''
 					text += f"{_Munge(previousItem, spacer, extraArgs = [item], returnMunger_onFail = True)}"
 				text += line
 				previousItem = item
@@ -1797,26 +1797,26 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		##########################################################
 
-		self.clipSimple = True #TO DO: Finish non-simple version
+		clipSimple = True #TO DO: Finish non-simple version
 
 		#Make a text version of the values
 		lines = []
 		if (event.text is not None):
 			text = event.text
-		elif (self.clipSimple):
+		elif (clipSimple):
 			text = getSimpleText()
 		else:
-			text = f"{_Munge(event.rows, self.clipPrefix, returnMunger_onFail = True)}"
+			text = f"{_Munge(event.rows, clipPrefix, returnMunger_onFail = True)}"
 
 			for row in event.rows:
 				if (not isinstance(row, DataListGroup)):
 					lines.append((row, getRowText(row)))
 				else:
-					clipGroup = _Munge(row, self.clipGroup, returnMunger_onFail = True)
+					clipGroup = _Munge(row, clipGroup, returnMunger_onFail = True)
 					if (clipGroup is not None):
 						lines.append((row, getGroupText(row, clipGroup)))
 			text += joinLines(lines)
-			text += f"{_Munge(event.rows, self.clipSuffix, returnMunger_onFail = True)}"
+			text += f"{_Munge(event.rows, clipSuffix, returnMunger_onFail = True)}"
 
 		#Tell the world that copying is done
 		event = self.TriggerEvent(DOLVEvent.CopiedEvent, log = log, text = text, rows = event.rows, columns = event.columns, returnEvent = True)
@@ -1828,7 +1828,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		clipboard.SetText(_text)
 
 		if (wx.TheClipboard.Open()):
-			if (wx.TheClipboard.SetData(clipboard) and _Munge(_text, self.clipKeepAfterClose, returnMunger_onFail = True)):
+			if (wx.TheClipboard.SetData(clipboard) and _Munge(_text, clipKeepAfterClose, returnMunger_onFail = True)):
 				wx.TheClipboard.Flush()
 			wx.TheClipboard.Close()
 		else:
@@ -3778,7 +3778,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		elif (isinstance(defn.renderer, (Renderer_Spin, wx.dataview.DataViewSpinRenderer,
 			wx.dataview.DataViewProgressRenderer, Renderer_Progress))):
 			try:
-				return int(value)
+				return float(value)
 			except TypeError:
 				return 0
 		
