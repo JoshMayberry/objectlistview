@@ -11,6 +11,7 @@ import wx.dataview
 import wx.lib.wordwrap
 
 from . import DOLVEvent
+from . import TextCtrl_AutoComplete
 
 #----------------------------------------------------------------------------
 # A DataView version of ObjectListView
@@ -2589,8 +2590,8 @@ class DataColumnDefn(object):
 	def __init__(self,title = "title", align = "left", width = -1, valueGetter = None, sortGetter = None, 
 		imageGetter = None, stringConverter = None, valueSetter = None, isSortable = True, isEditable = True, 
 		isReorderable = True, isResizeable = True, isHidden = False, isSpaceFilling = False, isSearchable = True, 
-		fixedWidth = None, minimumWidth = -1, maximumWidth = -1, cellEditorCreator = None, 
-		autoCompleteCellEditor = False, autoCompleteComboBoxCellEditor = False, checkStateGetter = None, 
+		fixedWidth = None, minimumWidth = -1, maximumWidth = -1, 
+		checkStateGetter = None, 
 		checkStateSetter = None, useBinarySearch = None, headerImage = -1, groupKeyGetter = None, 
 		groupKeyConverter = None, groupSortGetter = None, useInitialLetterForGroupKey = False, 
 		groupTitleSingleItem = None, groupTitlePluralItems = None, renderer = None, rendererArgs = [], rendererKwargs = {}):
@@ -2607,7 +2608,6 @@ class DataColumnDefn(object):
 		self.valueSetter = valueSetter
 		self.isSpaceFilling = isSpaceFilling
 		self._isSpaceFilling = False #Allows _Munge to be used for isSpaceFilling
-		self.cellEditorCreator = cellEditorCreator
 		self.freeSpaceProportion = 1
 		self.isEditable = isEditable
 		self.isSortable = isSortable
@@ -2633,14 +2633,6 @@ class DataColumnDefn(object):
 
 		if fixedWidth is not None:
 			self.SetFixedWidth(fixedWidth)
-
-		if autoCompleteCellEditor:
-			self.cellEditorCreator = lambda olv, row, col: CellEditor.MakeAutoCompleteTextBox(
-				olv, col)
-
-		if autoCompleteComboBoxCellEditor:
-			self.cellEditorCreator = lambda olv, row, col: CellEditor.MakeAutoCompleteComboBox(
-				olv, col)
 
 		self.checkStateGetter = checkStateGetter
 		self.checkStateSetter = checkStateSetter
@@ -3810,9 +3802,6 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# This is the function you need to override in your derived class but if you want to call it, 
 		# ChangeValue is usually more convenient as otherwise you need to manually call ValueChanged to update the control itself.
 
-		# We're not allowing edits in column zero (see below) so we just need
-		# to deal with Song objects and cols 1 - 5
-
 		node = self.ItemToObject(item)
 		if (isinstance(node, DataListGroup)):
 			return True
@@ -3886,7 +3875,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 	def GetColumnType(self, column):
 		#Override this to indicate what type of data is stored in the column specified by column.
 		#This should return a string indicating the type of data as reported by Variant .
-		hgjhghj
+		raise NotImplementedError()
 
 		mapper = { 0 : 'string',
 				   1 : 'string',
@@ -4765,18 +4754,23 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 	"""
 	If *editRaw* == True: Edit the un-formatted value
 	If *editRaw* == False: Edit the formatted value
+
+	If *autoComplete* is a list: Will use the given list to auto-complete things the user types
 	"""
 
-	def __init__(self, editor = None, password = False, ellipsize = True, editRaw = True, **kwargs):
+	def __init__(self, editor = None, password = False, ellipsize = True, editRaw = True, autoComplete = None, **kwargs):
 
 		wx.dataview.DataViewTextRenderer.__init__(self, **kwargs)
 		self.type = "text"
 		self.buildingKwargs = {**kwargs, "password": password}
 
+		self.patch_edit = False
+
 		self.password = password
 		self.SetEllipsize(ellipsize)
 		self.SetEditor(editor)
 		self.SetEditRaw(editRaw)
+		self.SetAutoComplete(autoComplete)
 
 	def Clone(self, **kwargs):
 		#Any keywords in kwargs will override keywords in buildingKwargs
@@ -4798,31 +4792,66 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		self.editRaw = editRaw
 		self.buildingKwargs["editRaw"] = editRaw
 
+	def SetAutoComplete(self, autoComplete = None):
+		self.autoComplete = autoComplete
+		self.buildingKwargs["autoComplete"] = autoComplete
+
 	def SetValue(self, value):
 		return super().SetValue(value[1])
+
+	def FinishEditing(self):
+		ctrl = self.GetEditorCtrl()
+
+		#Skip the next call after the popup menu is shown
+		if (ctrl.popup.IsActive()):
+			self.patch_edit = True
+			return False
+
+		if (self.patch_edit):
+			self.patch_edit = False
+			return False
+
+		return self.pre_FinishEditing(ctrl)
+
+	def pre_FinishEditing(self, ctrl):
+		if (not ctrl.popup.IsActive()):# and (ctrl.popup.IsShown())):
+			ctrl.popup.Hide()
+		
+		return super().FinishEditing()
+
+	def OnKillFocus(self, event):
+		self.FinishEditing()
+		event.Skip()
 
 	def HasEditorCtrl(self):
 		return True
 
 	def CreateEditorCtrl(self, parent, labelRect, value):
-
+		self.patch_edit = False
 		editor = _Munge(self, self.editor, returnMunger_onFail = True)
 		if (editor):
 			return editor
 
 		if (self.password):
-			style = "wx.TE_PASSWORD"
+			style = wx.TE_PASSWORD
 		else:
-			style = "0"
+			style = 0
 
-		if (self.editRaw):
-			_value = str(value[0])
+		editRaw = _Munge(self, self.editRaw, returnMunger_onFail = True)
+		_value = f"{value[not editRaw]}"
+
+		autoComplete = _Munge(self, self.autoComplete, returnMunger_onFail = True)
+		if (autoComplete):
+			ctrl = TextCtrl_AutoComplete.AutocompleteTextCtrl(parent, completer = autoComplete, value = _value, pos = labelRect.Position, size = labelRect.Size, style = style)
+			ctrl.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
+			ctrl.Bind(wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnKillFocus)
 		else:
-			_value = str(value[1])
-
-		ctrl = wx.TextCtrl(parent, value = _value, pos = labelRect.Position, size = labelRect.Size, style = eval(style, {'__builtins__': None, "wx": wx}, {}))
+			ctrl = wx.TextCtrl(parent, value = _value, pos = labelRect.Position, size = labelRect.Size, style = style)
 		ctrl.SetInsertionPointEnd()
 		ctrl.SelectAll()
+
+		self._editorCtrl = ctrl
+
 		return ctrl
 
 class Renderer_Spin(wx.dataview.DataViewSpinRenderer):
