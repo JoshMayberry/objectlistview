@@ -4805,8 +4805,13 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 	def SetValue(self, value):
 		return super().SetValue(value[1])
 
-	def FinishEditing(self):
+	def FinishEditing(self, fromEvent = False):
 		ctrl = self.GetEditorCtrl()
+
+		if (not isinstance(ctrl, AutocompleteTextCtrl)):
+			if (fromEvent):
+				return
+			return super().FinishEditing()
 
 		#Skip the next call after the popup menu is shown
 		if (ctrl.popup.IsActive()):
@@ -4826,7 +4831,7 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		return super().FinishEditing()
 
 	def OnKillFocus(self, event):
-		self.FinishEditing()
+		self.FinishEditing(fromEvent = True)
 		event.Skip()
 
 	def HasEditorCtrl(self):
@@ -4844,7 +4849,8 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 			style = 0
 
 		editRaw = _Munge(self, self.editRaw, returnMunger_onFail = True)
-		_value = f"{value[not editRaw]}"
+		_value = value[not editRaw]
+		_value = (f"{_value}", "")[_value is None]
 
 		autoComplete = _Munge(self, self.autoComplete, returnMunger_onFail = True)
 		if (autoComplete):
