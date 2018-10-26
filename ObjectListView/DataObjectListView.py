@@ -11,7 +11,7 @@ import wx.dataview
 import wx.lib.wordwrap
 
 from . import DOLVEvent
-from . import TextCtrl_AutoComplete
+from Utilities.wxPython import AutocompleteTextCtrl
 
 #----------------------------------------------------------------------------
 # A DataView version of ObjectListView
@@ -80,7 +80,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		
 		#Sorting
 		self.sortable 				= kwargs.pop("sortable", True)
-		self.caseSensative 			= kwargs.pop("caseSensative", True)
+		self.caseSensitive 			= kwargs.pop("caseSensitive", True)
 		self.compareFunction		= kwargs.pop("compareFunction", None)
 		self.unsortedFunction 		= kwargs.pop("unsortedFunction", None)
 		self.groupCompareFunction 	= kwargs.pop("groupCompareFunction", None)
@@ -4014,7 +4014,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		# When sorting large groups, this is called a lot. Make it efficent.
 		# It is more efficient (by about 30%) to try to call lower() and catch the
 		# exception than it is to test for the class
-		if (not self.olv.caseSensative):
+		if (not self.olv.caseSensitive):
 			try:
 				value = value.lower()
 			except AttributeError:
@@ -4692,6 +4692,7 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 
 	*default* is what selection the editor defaults to. Can be an integer or string that is in *choices*.
 	If *default* is None: Will try using what was in the cell (may not work with formatted text)
+	To ensure it is able to use what is currently in the cell, make use 'lambda value: value' for *default*
 	
 	*default* and *choices* can also be callable functions 
 	that accept the following args: unformatted_value, formatted_value
@@ -4758,7 +4759,7 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 	If *autoComplete* is a list: Will use the given list to auto-complete things the user types
 	"""
 
-	def __init__(self, editor = None, password = False, ellipsize = True, editRaw = True, autoComplete = None, **kwargs):
+	def __init__(self, editor = None, password = False, ellipsize = True, editRaw = True, autoComplete = None, caseSensitive = False, **kwargs):
 
 		wx.dataview.DataViewTextRenderer.__init__(self, **kwargs)
 		self.type = "text"
@@ -4771,6 +4772,7 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		self.SetEditor(editor)
 		self.SetEditRaw(editRaw)
 		self.SetAutoComplete(autoComplete)
+		self.SetCaseSensitive(caseSensitive)
 
 	def Clone(self, **kwargs):
 		#Any keywords in kwargs will override keywords in buildingKwargs
@@ -4795,6 +4797,10 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 	def SetAutoComplete(self, autoComplete = None):
 		self.autoComplete = autoComplete
 		self.buildingKwargs["autoComplete"] = autoComplete
+
+	def SetCaseSensitive(self, caseSensitive = None):
+		self.caseSensitive = caseSensitive
+		self.buildingKwargs["caseSensitive"] = caseSensitive
 
 	def SetValue(self, value):
 		return super().SetValue(value[1])
@@ -4842,7 +4848,8 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 
 		autoComplete = _Munge(self, self.autoComplete, returnMunger_onFail = True)
 		if (autoComplete):
-			ctrl = TextCtrl_AutoComplete.AutocompleteTextCtrl(parent, completer = autoComplete, value = _value, pos = labelRect.Position, size = labelRect.Size, style = style)
+			caseSensitive = _Munge(self, self.caseSensitive, returnMunger_onFail = True)
+			ctrl = AutocompleteTextCtrl(parent, completer = autoComplete, caseSensitive = caseSensitive, value = _value, pos = labelRect.Position, size = labelRect.Size, style = style)
 			ctrl.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
 			ctrl.Bind(wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnKillFocus)
 		else:
