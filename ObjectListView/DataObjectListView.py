@@ -2587,7 +2587,7 @@ class DataColumnDefn(object):
 		If None: The default renderer for a wxListItem will be used.
 	"""
 
-	def __init__(self,title = "title", align = "left", width = -1, valueGetter = None, sortGetter = None, 
+	def __init__(self, title = "title", align = "left", width = -1, valueGetter = None, sortGetter = None, 
 		imageGetter = None, stringConverter = None, valueSetter = None, isSortable = True, isEditable = True, 
 		isReorderable = True, isResizeable = True, isHidden = False, isSpaceFilling = False, isSearchable = True, 
 		fixedWidth = None, minimumWidth = -1, maximumWidth = -1, 
@@ -3158,15 +3158,16 @@ def _StringToValue(value, converter, extraArgs = []):
 	"""
 	Convert the given value to a string, using the given converter
 	"""
-	if (extraArgs):
-		try:
-			return converter(value, *extraArgs)
-		except:
-			pass
-	try:
+
+	if (callable(converter)):
+		if (extraArgs):
+			try:
+				return converter(value, *extraArgs)
+			except TypeError:
+				pass
+
+		#Allow the error to propigate if one occurs
 		return converter(value)
-	except TypeError:
-		pass
 
 	if (converter and isinstance(value, (datetime.datetime, datetime.date, datetime.time))):
 		return value.strftime(converter)
@@ -3179,10 +3180,16 @@ def _StringToValue(value, converter, extraArgs = []):
 		return ""
 
 	fmt = converter or "%s"
-	try:
-		return fmt % value
-	except UnicodeError:
-		return unicode(fmt) % value
+	if (value is None):
+		try:
+			return fmt % ""
+		except UnicodeError:
+			return unicode(fmt) % ""
+	else:
+		try:
+			return fmt % value
+		except UnicodeError:
+			return unicode(fmt) % value
 
 def _SetValueUsingMunger(modelObject, value, munger, extraArgs = []):
 	"""
@@ -4717,6 +4724,8 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 		return super().__self_class__(**instructions)
 
 	def SetValue(self, value):
+		if (value[1] is None):
+			return super().SetValue("")
 		return super().SetValue(value[1])
 
 	def SetDefault(self, default = None):
@@ -4759,7 +4768,7 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 	If *autoComplete* is a list: Will use the given list to auto-complete things the user types
 	"""
 
-	def __init__(self, editor = None, password = False, ellipsize = True, editRaw = True, autoComplete = None, caseSensitive = False, **kwargs):
+	def __init__(self, editor = None, password = False, ellipsize = True, editRaw = True, autoComplete = None, caseSensitive = False, alwaysShow = False, **kwargs):
 
 		wx.dataview.DataViewTextRenderer.__init__(self, **kwargs)
 		self.type = "text"
@@ -4768,9 +4777,10 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		self.patch_edit = False
 
 		self.password = password
-		self.SetEllipsize(ellipsize)
 		self.SetEditor(editor)
 		self.SetEditRaw(editRaw)
+		self.SetEllipsize(ellipsize)
+		self.SetAlwaysShow(alwaysShow)
 		self.SetAutoComplete(autoComplete)
 		self.SetCaseSensitive(caseSensitive)
 
@@ -4794,6 +4804,10 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		self.editRaw = editRaw
 		self.buildingKwargs["editRaw"] = editRaw
 
+	def SetAlwaysShow(self, alwaysShow = None):
+		self.alwaysShow = alwaysShow
+		self.buildingKwargs["alwaysShow"] = alwaysShow
+
 	def SetAutoComplete(self, autoComplete = None):
 		self.autoComplete = autoComplete
 		self.buildingKwargs["autoComplete"] = autoComplete
@@ -4803,10 +4817,12 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		self.buildingKwargs["caseSensitive"] = caseSensitive
 
 	def SetValue(self, value):
+		if (value[1] is None):
+			return super().SetValue("")
 		return super().SetValue(value[1])
 
-	def FinishEditing(self, fromEvent = False):
-		ctrl = self.GetEditorCtrl()
+	def FinishEditing(self, ctrl = None, fromEvent = False):
+		ctrl = ctrl or self.GetEditorCtrl()
 
 		if (not isinstance(ctrl, AutocompleteTextCtrl)):
 			if (fromEvent):
@@ -4825,13 +4841,19 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		return self.pre_FinishEditing(ctrl)
 
 	def pre_FinishEditing(self, ctrl):
-		if (not ctrl.popup.IsActive()):# and (ctrl.popup.IsShown())):
+		if (not ctrl.popup.IsActive()):
 			ctrl.popup.Hide()
 		
 		return super().FinishEditing()
 
 	def OnKillFocus(self, event):
 		self.FinishEditing(fromEvent = True)
+		event.Skip()
+
+	def OnSelectOther(self, event):
+		ctrl = self.GetEditorCtrl()
+
+		self.FinishEditing(ctrl = ctrl, fromEvent = True)
 		event.Skip()
 
 	def HasEditorCtrl(self):
@@ -4854,10 +4876,13 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 
 		autoComplete = _Munge(self, self.autoComplete, returnMunger_onFail = True)
 		if (autoComplete):
+			alwaysShow = _Munge(self, self.alwaysShow, returnMunger_onFail = True)
 			caseSensitive = _Munge(self, self.caseSensitive, returnMunger_onFail = True)
-			ctrl = AutocompleteTextCtrl(parent, completer = autoComplete, caseSensitive = caseSensitive, value = _value, pos = labelRect.Position, size = labelRect.Size, style = style)
+			ctrl = AutocompleteTextCtrl(parent, completer = autoComplete, caseSensitive = caseSensitive, alwaysShow = alwaysShow, 
+				value = _value, pos = labelRect.Position, size = labelRect.Size, style = style)
+
 			ctrl.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
-			ctrl.Bind(wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnKillFocus)
+			ctrl.Bind(wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnSelectOther)
 		else:
 			ctrl = wx.TextCtrl(parent, value = _value, pos = labelRect.Position, size = labelRect.Size, style = style)
 		ctrl.SetInsertionPointEnd()
