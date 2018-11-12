@@ -94,6 +94,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.cellBeingEdited = None
 		self.selectionBeforeCellEdit = []
 
+		self.readOnly 		= kwargs.pop("readOnly", False)
 		self.cellEditMode 	= kwargs.pop("cellEditMode", self.CELLEDIT_NONE)
 
 		#Searching
@@ -324,7 +325,12 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewColumn.html
 		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewColumnFlags.enumeration.html
 		#https://wxpython.org/Phoenix/docs/html/wx.dataview.DataViewCtrl.html#wx.dataview.DataViewCtrl.AppendColumn
-		defn.SetEditable(refreshColumn = False)
+		
+		if (self.readOnly):
+			defn.SetEditable(refreshColumn = False, changeVar = False, state = False)
+		else:
+			defn.SetEditable(refreshColumn = False, changeVar = False)
+
 		defn.column = wx.dataview.DataViewColumn(defn.title, defn.renderer, index or len(self.columns) - 1, 
 			width = defn.width, align = defn.GetAlignment())#, flags = wx.COL_WIDTH_AUTOSIZE)
 		defn.SetHidden()
@@ -1483,10 +1489,27 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			self.RepopulateList()
 
 	#Editing
+	def SetReadOnly(self, state = True):
+		"""
+		Makes the entire table editable/uneditable
+		"""
+
+		self.readOnly = state
+		_state = (None, False)[self.readOnly]
+
+		for column in self.columns.values():
+			column.SetEditable(refreshColumn = False, changeVar = False, state = _state)
+
+	def GetReadOnly(self):
+		return self.readOnly
+
 	def StartCellEdit(self, objectModel, defn):
 		"""
 		Start an edit operation on the given cell.
 		"""
+
+		if (self.readOnly):
+			return
 
 		self.EditItem(self.model.ObjectToItem(objectModel), defn.column)
 
@@ -1494,6 +1517,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		"""
 		Start an edit operation on the given cell after performing some sanity checks.
 		"""
+
+		if (self.readOnly):
+			return
 
 		if (objectModel is None):
 			return
@@ -2495,7 +2521,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 	def _RelayEditCellStarting(self, relayEvent):
 		#Do not start editing non-editable columns
-		if (not self.columns[relayEvent.GetDataViewColumn().GetModelColumn()].isEditable):
+		if (self.readOnly or (not self.columns[relayEvent.GetDataViewColumn().GetModelColumn()].isEditable)):
 			relayEvent.Veto()
 		else:
 			self._RelayEvent(relayEvent, DOLVEvent.EditCellStartingEvent)
@@ -2706,8 +2732,8 @@ class DataColumnDefn(object):
 	def GetSortable(self):
 		return self.column.IsSortable()
 
-	def SetEditable(self, state = None, refreshColumn = True):
-		if (state is not None):
+	def SetEditable(self, state = None, refreshColumn = True, changeVar = True):
+		if (changeVar and (state is not None)):
 			self.isEditable = state
 
 		if (_Munge(self, self.isEditable, returnMunger_onFail = True)):
