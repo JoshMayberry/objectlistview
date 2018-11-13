@@ -29,7 +29,8 @@ from . import Filter
 
 from . DataObjectListView import DataObjectListView, DataColumnDefn, DataListGroup, DataListEmptyGroup
 from . DOLVEvent import EVT_DATA_SELECTION_CHANGED, EVT_DATA_CELL_LEFT_CLICK, EVT_DATA_CELL_RIGHT_CLICK, EVT_DATA_CELL_ACTIVATED, EVT_DATA_GROUP_SELECTED
-from . DOLVEvent import EVT_DATA_COLUMN_HEADER_LEFT_CLICK, EVT_DATA_COLUMN_HEADER_RIGHT_CLICK, EVT_DATA_SORTING, EVT_DATA_SORTED, EVT_DATA_REORDER
+from . DOLVEvent import EVT_DATA_COLUMN_HEADER_LEFT_CLICK, EVT_DATA_COLUMN_HEADER_RIGHT_CLICK, EVT_DATA_SORTING, EVT_DATA_SORTED
+from . DOLVEvent import EVT_DATA_REORDERING, EVT_DATA_REORDERED, EVT_DATA_REORDER_CANCEL
 # from . DOLVEvent import EVT_DATA_DRAG_STARTING, EVT_DATA_DRAG_STARTED, EVT_DATA_DRAG_FINISHING, EVT_DATA_DRAG_FINISHED,
 # from . DOLVEvent import EVT_DATA_DROP_STARTING, EVT_DATA_DROP_STARTED, EVT_DATA_DROP_FINISHING, EVT_DATA_DROP_FINISHED, EVT_DATA_DROP_POSSIBLE
 from . DOLVEvent import EVT_DATA_CELL_EDIT_STARTING, EVT_DATA_CELL_EDIT_STARTED, EVT_DATA_CELL_EDIT_FINISHING, EVT_DATA_CELL_EDIT_FINISHED
@@ -41,7 +42,8 @@ from . DOLVEvent import EVT_DATA_UNDO_EMPTY, EVT_DATA_REDO_EMPTY, EVT_DATA_UNDO_
 from . DOLVEvent import SelectionChangedEvent, CellRightClickEvent, CellActivatedEvent
 from . DOLVEvent import ColumnHeaderLeftClickEvent, ColumnHeaderRightClickEvent, GroupCreationEvent, GroupSelectedEvent
 from . DOLVEvent import CollapsingEvent, ExpandingEvent, CollapsedEvent, ExpandedEvent
-from . DOLVEvent import SortingEvent, SortedEvent, ReorderEvent, MenuCreationEvent, MenuItemSelectedEvent
+from . DOLVEvent import SortingEvent, SortedEvent, MenuCreationEvent, MenuItemSelectedEvent
+from . DOLVEvent import ReorderingEvent, ReorderedEvent, ReorderCancelEvent
 from . DOLVEvent import EditCellStartingEvent, EditCellStartedEvent, EditCellFinishingEvent
 
 __all__ = [

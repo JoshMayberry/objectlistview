@@ -6,6 +6,9 @@ import time
 import types
 import datetime
 
+import operator
+import functools
+
 import wx
 import wx.dataview
 import wx.lib.wordwrap
@@ -177,26 +180,26 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		#Setup Style
 		style = kwargs.pop("style", None) #Do NOT pass in wx.LC_REPORT, or it will call virtual functions A LOT
+
 		if (style is None):
-			style = "0"
 			if (self.singleSelect):
-				style += "|wx.dataview.DV_SINGLE"
+				style = [wx.dataview.DV_SINGLE]
 			else:
-				style += "|wx.dataview.DV_MULTIPLE"
+				style = [wx.dataview.DV_MULTIPLE]
 
 			if (self.horizontalLines):
-				style += "|wx.dataview.DV_HORIZ_RULES"
+				style.append(wx.dataview.DV_HORIZ_RULES)
 
 			if (self.verticalLines):
-				style += "|wx.dataview.DV_VERT_RULES"
+				style.append(wx.dataview.DV_VERT_RULES)
 
 			if (self.noHeader):
-				style += "|wx.dataview.DV_NO_HEADER"
+				style.append(wx.dataview.DV_NO_HEADER)
 
 			# if (self.useAlternateBackColors):
 			# 	#Currently only supported by the native GTK and OS X implementations
 			# 	style += "|wx.dataview.DV_ROW_LINES" #Cannot change colors?
-			wx.dataview.DataViewCtrl.__init__(self, *args, style = eval(style, {'__builtins__': None, "wx": wx}, {}), **kwargs)
+			wx.dataview.DataViewCtrl.__init__(self, *args, style = functools.reduce(operator.ior, style or (0,)), **kwargs)
 		else:
 			wx.dataview.DataViewCtrl.__init__(self, *args, style = style, **kwargs)
 
@@ -234,7 +237,9 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.Bind(wx.dataview.EVT_DATAVIEW_COLUMN_HEADER_RIGHT_CLICK, self._RelayColumnHeaderRightClick)
 
 		self.Bind(wx.dataview.EVT_DATAVIEW_COLUMN_SORTED, self._RelaySorted)
-		self.Bind(wx.dataview.EVT_DATAVIEW_COLUMN_REORDERED, self._RelayReorder)
+		self.Bind(wx.EVT_HEADER_BEGIN_REORDER, self._RelayReordering)
+		self.Bind(wx.EVT_HEADER_END_REORDER, self._RelayReordered)
+		self.Bind(wx.EVT_HEADER_DRAGGING_CANCELLED, self._RelayReorderCancel)
 
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_COLLAPSING, self._RelayCollapsing)
 		self.Bind(wx.dataview.EVT_DATAVIEW_ITEM_COLLAPSED, self._RelayCollapsed)
@@ -279,15 +284,17 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		self.AssociateModel(self.model)
 		self.model.DecRef() # avoid memory leak
 
-	def SetColumns(self, columns, repopulate = True):
+	def SetColumns(self, columns, repopulate = True, clearRows = False):
 		sortCol = self.GetSortColumn()
 		self.ClearColumns()
-		self.ClearAll()
+
+		if (clearRows):
+			self.ClearAll()
 
 		self.columns = {}
 		
 		if (self.hideFirstIndent and (not self.showGroups)):
-			x = self.AddColumnDefn(DataColumnDefn(title = "", width = 20))
+			x = self.AddColumnDefn(DataColumnDefn(title = "", width = 0))
 			x.isInternal = True
 			# self.SetExpanderColumn(x.column)
 
@@ -606,6 +613,23 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		item = self.model.GetPreviousItem(modelObject, wrap = wrap)
 		if (item.IsOk()):
 			return self.model.ItemToObject(item)
+
+	def GetColumnPosition(self, column = None):
+		"""Return the position of the column or -1 if it is not in this table.
+
+		Example Input: GetColumnPosition()
+		"""
+
+		if (column is None):
+			catalogue = {}
+			for _column in self.columns.values():
+				if (_column.isInternal):
+					continue
+				catalogue.update(self.GetColumnPosition(_column))
+			return catalogue
+
+		column = self.GetColumn(column)
+		return {super().GetColumnPosition(column.column): column}
 
 	#Selection Functions
 	def SetCurrentObject(self, modelObject):
@@ -2385,30 +2409,32 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	#Event Relays
 	def _getRelayInfo(self, relayEvent):
 		kwargs = {}
-		try:
-			column = relayEvent.GetDataViewColumn()
-			kwargs["index"] = column.GetModelColumn()
-			kwargs["column"] = self.columns.get(kwargs["index"], None)
-			if (not self.GetSortingColumn()):
+		if (isinstance(relayEvent, wx.dataview.DataViewEvent)):
+			try:
+				column = relayEvent.GetDataViewColumn()
+				kwargs["index"] = column.GetModelColumn()
+				kwargs["column"] = self.columns.get(kwargs["index"], None)
+				if (not self.GetSortingColumn()):
+					kwargs["ascending"] = None
+				else:
+					kwargs["ascending"] = column.IsSortOrderAscending()
+			except AttributeError as error:
+				kwargs["index"] = None
+				kwargs["column"] = None
 				kwargs["ascending"] = None
-			else:
-				kwargs["ascending"] = column.IsSortOrderAscending()
-		except AttributeError as error:
-			kwargs["index"] = None
-			kwargs["column"] = None
-			kwargs["ascending"] = None
 
-		try:
-			kwargs["row"] = relayEvent.GetModel().ItemToObject(relayEvent.GetItem())
-		except TypeError:
-			kwargs["row"] = None
-		kwargs["position"] = relayEvent.GetPosition()
-		kwargs["editCanceled"] = relayEvent.IsEditCancelled()
+			try:
+				kwargs["row"] = relayEvent.GetModel().ItemToObject(relayEvent.GetItem())
+			except TypeError:
+				kwargs["row"] = None
+			kwargs["position"] = relayEvent.GetPosition()
+			kwargs["editCanceled"] = relayEvent.IsEditCancelled()
 
-		kwargs["value"] = relayEvent.GetValue()
-		if (isinstance(kwargs["value"], wx.dataview.DataViewIconText)):
-			kwargs["value"] = kwargs["value"].GetText()
-
+			kwargs["value"] = relayEvent.GetValue()
+			if (isinstance(kwargs["value"], wx.dataview.DataViewIconText)):
+				kwargs["value"] = kwargs["value"].GetText()
+		else:
+			kwargs["index"] = relayEvent.GetColumn()
 		return kwargs
 
 	def TriggerEvent(self, eventFunction, returnEvent = False, **kwargs):
@@ -2420,18 +2446,20 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 
 		newEvent = eventFunction(self, **kwargs)
 		self.GetEventHandler().ProcessEvent(newEvent)
+
 		if (returnEvent):
 			return newEvent
 		if (isinstance(newEvent, DOLVEvent.VetoableEvent)):
 			if (newEvent.IsVetoed()):
 				return False
-			return
+			# return
 		return True
 
 	def _RelayEvent(self, eventFrom, eventTo, info = None):
 		if (not info):
 			info = self._getRelayInfo(eventFrom)
 		answer = self.TriggerEvent(eventTo, **info)
+
 		if (answer):
 			eventFrom.Skip()
 		elif (answer is not None):
@@ -2504,8 +2532,14 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 	def _RelaySorted(self, relayEvent):
 		self._RelayEvent(relayEvent, DOLVEvent.SortedEvent)
 
-	def _RelayReorder(self, relayEvent):
-		self._RelayEvent(relayEvent, DOLVEvent.ReorderEvent)
+	def _RelayReordering(self, relayEvent):
+		self._RelayEvent(relayEvent, DOLVEvent.ReorderingEvent)
+
+	def _RelayReordered(self, relayEvent):
+		self._RelayEvent(relayEvent, DOLVEvent.ReorderedEvent)
+
+	def _RelayReorderCancel(self, relayEvent):
+		self._RelayEvent(relayEvent, DOLVEvent.ReorderCancelEvent)
 
 	def _RelayCollapsing(self, relayEvent):
 		self._RelayEvent(relayEvent, DOLVEvent.CollapsingEvent)

@@ -39,7 +39,10 @@ def _EventMaker():
 
 (olv_EVT_DATA_SORTING, EVT_DATA_SORTING) = _EventMaker()
 (olv_EVT_DATA_SORTED, EVT_DATA_SORTED) = _EventMaker()
-(olv_EVT_DATA_REORDER, EVT_DATA_REORDER) = _EventMaker()
+
+(olv_EVT_DATA_REORDERING, EVT_DATA_REORDERING) = _EventMaker()
+(olv_EVT_DATA_REORDERED, EVT_DATA_REORDERED) = _EventMaker()
+(olv_EVT_DATA_REORDER_CANCEL, EVT_DATA_REORDER_CANCEL) = _EventMaker()
 
 (olv_EVT_DATA_GROUP_CREATING, EVT_DATA_GROUP_CREATING) = _EventMaker()
 (olv_EVT_DATA_MENU_CREATING, EVT_DATA_MENU_CREATING) = _EventMaker()
@@ -306,19 +309,47 @@ class SortedEvent(wx.PyCommandEvent):
 		self.column = kwargs.pop("column", None)
 		self.ascending = kwargs.pop("ascending", None)
 
-class ReorderEvent(wx.PyCommandEvent):
+class ReorderingEvent(VetoableEvent):
 	"""
-	Data was reordered.
+	Data is being reordered.
+	If the handler calls Veto(), the column will go back to where it was.
 	"""
 
 	def __init__(self, objectListView, **kwargs):
-		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_REORDER, -1)
+		VetoableEvent.__init__(self, olv_EVT_DATA_REORDERING)
 		self.SetEventObject(objectListView)
 		self.objectListView = objectListView
 
 		self.index = kwargs.pop("index", None)
 		self.column = kwargs.pop("column", None)
-		self.ascending = kwargs.pop("ascending", None)
+
+class ReorderedEvent(VetoableEvent):
+	"""
+	Data was reordered.
+	If the handler calls Veto(), the column will go back to where it was.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		VetoableEvent.__init__(self, olv_EVT_DATA_REORDERED)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.index = kwargs.pop("index", None)
+		self.column = kwargs.pop("column", None)
+
+class ReorderCancelEvent(wx.PyCommandEvent):
+	"""
+	The resizing or reordering operation currently in progress was cancelled. 
+	This can happen if the user pressed Esc key while dragging the mouse or the mouse capture was lost for some other reason.
+	"""
+
+	def __init__(self, objectListView, **kwargs):
+		wx.PyCommandEvent.__init__(self, olv_EVT_DATA_REORDER_CANCEL, -1)
+		self.SetEventObject(objectListView)
+		self.objectListView = objectListView
+
+		self.index = kwargs.pop("index", None)
+		self.column = kwargs.pop("column", None)
 
 #----------------------------------------------------------------------------
 #Editing
