@@ -14,7 +14,8 @@ import wx.dataview
 import wx.lib.wordwrap
 
 from . import DOLVEvent
-from Utilities.wxPython import AutocompleteTextCtrl
+import Utilities as MyUtilities
+AutocompleteTextCtrl = MyUtilities.wxPython.AutocompleteTextCtrl
 
 #----------------------------------------------------------------------------
 # A DataView version of ObjectListView
@@ -1799,23 +1800,23 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 			if (_text is not None):
 				return _text
 
-			text = f"{_Munge(row, clipRowPrefix, returnMunger_onFail = True)}"
+			text = f"{_Munge(clipRowPrefix, source = row, returnMunger_onFail = True)}"
 
 			previousItem = None
 			for column in columns:
 				if (previousItem is not None):
-					text += f"{_Munge(_row, clipColumnSpacer, extraArgs = [previousItem, column], returnMunger_onFail = True)}"
+					text += f"{_Munge(clipColumnSpacer, source = _row, extraArgs = [previousItem, column], returnMunger_onFail = True)}"
 				text += column.GetStringValue(_row)
 				previousItem = column
 
-			text += f"{_Munge(_row, clipRowSuffix, returnMunger_onFail = True)}"
+			text += f"{_Munge(clipRowSuffix, source = _row, returnMunger_onFail = True)}"
 			return text
 
 		def getGroupText(group, _clipGroup):
 			nonlocal self
 
 			logGroup(group, clipGroup = _clipGroup)
-			text = f"{_Munge(group, clipGroupPrefix, returnMunger_onFail = True)}"
+			text = f"{_Munge(clipGroupPrefix, source = group, returnMunger_onFail = True)}"
 
 			if (not _clipGroup):
 				text += f"{group.title}"
@@ -1825,7 +1826,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 					lines.append((row, getRowText(row)))
 				text += joinLines(lines)
 
-			text += f"{_Munge(group, clipGroupSuffix, returnMunger_onFail = True)}"
+			text += f"{_Munge(clipGroupSuffix, source = group, returnMunger_onFail = True)}"
 			return text
 
 		def joinLines(lines):
@@ -1840,7 +1841,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 						spacer = clipGroupSpacer
 					else:
 						spacer = clipRowSpacer or ''
-					text += f"{_Munge(previousItem, spacer, extraArgs = [item], returnMunger_onFail = True)}"
+					text += f"{_Munge(spacer, source = previousItem, extraArgs = [item], returnMunger_onFail = True)}"
 				text += line
 				previousItem = item
 
@@ -1857,17 +1858,17 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		elif (clipSimple):
 			text = getSimpleText()
 		else:
-			text = f"{_Munge(event.rows, clipPrefix, returnMunger_onFail = True)}"
+			text = f"{_Munge(clipPrefix, source = event.rows, returnMunger_onFail = True)}"
 
 			for row in event.rows:
 				if (not isinstance(row, DataListGroup)):
 					lines.append((row, getRowText(row)))
 				else:
-					clipGroup = _Munge(row, clipGroup, returnMunger_onFail = True)
+					clipGroup = _Munge(clipGroup, source = row, returnMunger_onFail = True)
 					if (clipGroup is not None):
 						lines.append((row, getGroupText(row, clipGroup)))
 			text += joinLines(lines)
-			text += f"{_Munge(event.rows, clipSuffix, returnMunger_onFail = True)}"
+			text += f"{_Munge(clipSuffix, source = event.rows, returnMunger_onFail = True)}"
 
 		#Tell the world that copying is done
 		event = self.TriggerEvent(DOLVEvent.CopiedEvent, log = log, text = text, rows = event.rows, columns = event.columns, returnEvent = True)
@@ -1879,7 +1880,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 		clipboard.SetText(_text)
 
 		if (wx.TheClipboard.Open()):
-			if (wx.TheClipboard.SetData(clipboard) and _Munge(_text, clipKeepAfterClose, returnMunger_onFail = True)):
+			if (wx.TheClipboard.SetData(clipboard) and _Munge(clipKeepAfterClose, source = _text, returnMunger_onFail = True)):
 				wx.TheClipboard.Flush()
 			wx.TheClipboard.Close()
 		else:
@@ -2394,7 +2395,7 @@ class DataObjectListView(wx.dataview.DataViewCtrl):
 				dc = wx.GCDC(dc) #Mac's DC is already the same as a GCDC
 
 			size = item.GetClientSize()
-			_drawText(dc, text = message, rectangle = wx.Rect(0, 0, size[0], size[1]), x_align = "center", color = wx.LIGHT_GREY, font = self.emptyListFont, wrap = True)
+			_drawText(dc, text = message, align = wx.Rect(0, 0, size[0], size[1]), x_align = "center", color = wx.LIGHT_GREY, font = self.emptyListFont, wrap = True)
 
 			del odc  # Make sure the odc is destroyed before the dc is.
 
@@ -2732,7 +2733,7 @@ class DataColumnDefn(object):
 		if (width is None):
 			width = wx.LIST_AUTOSIZE
 
-		return self.column.SetWidth(_Munge(self, width, returnMunger_onFail = True))
+		return self.column.SetWidth(_Munge(width, source = self, returnMunger_onFail = True))
 
 	def GetAlignment(self):
 		"""
@@ -2761,7 +2762,7 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isSortable = state
 
-		self.column.SetSortable(_Munge(self, self.isSortable, returnMunger_onFail = True))
+		self.column.SetSortable(_Munge(self.isSortable, source = self, returnMunger_onFail = True))
 
 	def GetSortable(self):
 		return self.column.IsSortable()
@@ -2770,7 +2771,7 @@ class DataColumnDefn(object):
 		if (changeVar and (state is not None)):
 			self.isEditable = state
 
-		if (_Munge(self, self.isEditable, returnMunger_onFail = True)):
+		if (_Munge(self.isEditable, source = self, returnMunger_onFail = True)):
 			key = "edit"
 		else:
 			key = "nonEdit"
@@ -2784,7 +2785,7 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isReorderable = state
 
-		self.column.SetReorderable(_Munge(self, self.isReorderable, returnMunger_onFail = True))
+		self.column.SetReorderable(_Munge(self.isReorderable, source = self, returnMunger_onFail = True))
 
 	def GetReorderable(self):
 		return self.column.IsReorderable()
@@ -2793,7 +2794,7 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isResizeable = state
 
-		self.column.SetResizeable(_Munge(self, self.isResizeable, returnMunger_onFail = True))
+		self.column.SetResizeable(_Munge(self.isResizeable, source = self, returnMunger_onFail = True))
 
 	def GetResizeable(self):
 		return self.column.IsResizeable()
@@ -2802,7 +2803,7 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isHidden = state
 
-		self.column.SetHidden(_Munge(self, self.isHidden, returnMunger_onFail = True))
+		self.column.SetHidden(_Munge(self.isHidden, source = self, returnMunger_onFail = True))
 
 	def GetHidden(self):
 		return self.column.IsHidden()
@@ -2811,7 +2812,7 @@ class DataColumnDefn(object):
 		if (state is not None):
 			self.isSpaceFilling = state
 
-		self._isSpaceFilling = _Munge(self, self.isSpaceFilling, returnMunger_onFail = True)
+		self._isSpaceFilling = _Munge(self.isSpaceFilling, source = self, returnMunger_onFail = True)
 
 	def GetSpaceFilling(self):
 		return self._isSpaceFilling
@@ -2823,13 +2824,14 @@ class DataColumnDefn(object):
 		"""
 		Return the value for this column from the given modelObject
 		"""
-		return _Munge(modelObject, self.valueGetter)
+		return _Munge(self.valueGetter, source = modelObject)
 
 	def GetStringValue(self, modelObject):
 		"""
 		Return a string representation of the value for this column from the given modelObject
 		"""
 		value = self.GetValue(modelObject)
+
 		return _StringToValue(value, self.stringConverter, extraArgs = [self])
 
 	def GetGroupKey(self, modelObject):
@@ -2839,7 +2841,7 @@ class DataColumnDefn(object):
 		if (self.groupKeyGetter is None):
 			key = self.GetValue(modelObject)
 		else:
-			key = _Munge(modelObject, self.groupKeyGetter)
+			key = _Munge(self.groupKeyGetter, source = modelObject)
 		if (self.useInitialLetterForGroupKey):
 			try:
 				return key[:1].upper()
@@ -2912,7 +2914,7 @@ class DataColumnDefn(object):
 		"""
 		global rendererCatalogue
 
-		renderer = _Munge(self, renderer, returnMunger_onFail = True)
+		renderer = _Munge(renderer, source = self, returnMunger_onFail = True)
 		try:
 			self.renderer = rendererCatalogue[renderer]["class"](*args, **kwargs)
 		except (AttributeError, KeyError):
@@ -3043,7 +3045,7 @@ class ContextMenu(object):
 		#Create the menu
 		menu = wx.Menu()
 		for item_id in self.contents:
-			text = _Munge(self.row, self.idCatalogue[item_id], extraArgs = [self.column], returnMunger_onFail = True)
+			text = _Munge(self.idCatalogue[item_id], source = self.row, extraArgs = [self.column], returnMunger_onFail = True)
 
 			if ((item_id in self.conditions) and (not self.conditions[item_id](self.row, self.column, text))):
 				continue
@@ -3057,11 +3059,11 @@ class ContextMenu(object):
 
 			elif (item_id in self.checks):
 				menu.AppendCheckItem(item_id, text)
-				menu.Check(item_id, _Munge(self.row, self.checks[item_id], extraArgs = [self.column], returnMunger_onFail = True))
+				menu.Check(item_id, _Munge(self.checks[item_id], source = self.row, extraArgs = [self.column], returnMunger_onFail = True))
 
 			elif (item_id in self.radios):
 				menu.AppendRadioItem(item_id, text)
-				menu.Check(item_id, _Munge(self.row, self.radios[item_id], extraArgs = [self.column], returnMunger_onFail = True))
+				menu.Check(item_id, _Munge(self.radios[item_id], source = self.row, extraArgs = [self.column], returnMunger_onFail = True))
 			
 			else:
 				menu.Append(item_id, text)
@@ -3189,347 +3191,13 @@ class UndoPaste():
 		return self.undo(undo = not redo)
 
 #Utility Functions
-def printCurrentTrace(printout = True):
-	"""Prints out the stack trace for the current place in the program.
-	Modified Code from codeasone on https://stackoverflow.com/questions/1032813/dump-stacktraces-of-all-active-threads
+_StringToValue = MyUtilities.common._StringToValue
+_SetValueUsingMunger = MyUtilities.common._SetValueUsingMunger
+_Munge = MyUtilities.common._Munge
 
-	Example Input: printCurrentTrace()
-	"""
-
-	import sys
-	import traceback
-	code = []
-	for threadId, stack in sys._current_frames().items():
-		code.append("\n# ThreadID: %s" % threadId)
-		for filename, lineno, name, line in traceback.extract_stack(stack):
-			code.append('File: "%s", line %d, in %s' % (filename,
-														lineno, name))
-			if line:
-				code.append("  %s" % (line.strip()))
-
-	if (printout):
-		for line in code:
-			print (line)
-		sys.exit()
-	else:
-		return code
-
-def _StringToValue(value, converter, extraArgs = []):
-	"""
-	Convert the given value to a string, using the given converter
-	"""
-
-	if (callable(converter)):
-		if (extraArgs):
-			try:
-				return converter(value, *extraArgs)
-			except TypeError:
-				pass
-
-		#Allow the error to propigate if one occurs
-		return converter(value)
-
-	if (converter and isinstance(value, (datetime.datetime, datetime.date, datetime.time))):
-		return value.strftime(converter)
-
-	if (converter and isinstance(value, wx.DateTime)):
-		return value.Format(converter)
-
-	# By default, None is changed to an empty string.
-	if ((not converter) and (not value)):
-		return ""
-
-	fmt = converter or "%s"
-	if (value is None):
-		try:
-			return fmt % ""
-		except UnicodeError:
-			return unicode(fmt) % ""
-	else:
-		try:
-			return fmt % value
-		except UnicodeError:
-			return unicode(fmt) % value
-
-def _SetValueUsingMunger(modelObject, value, munger, extraArgs = []):
-	"""
-	Look for ways to update modelObject with value using munger.
-	"""
-	# If there isn't a munger, we can't do anything
-	if (munger is None):
-		return
-
-	# Is munger a function?
-	if (extraArgs):
-		try:
-			munger(modelObject, value, *extraArgs)
-			return
-		except:
-			pass
-	try:
-		munger(modelObject, value)
-		return
-	except:
-		pass
-
-	# Is munger a dictionary key?
-	try:
-		if (munger in modelObject):
-			modelObject[munger] = value
-			return
-	except:
-		pass
-
-	# Is munger the name of a method?
-	try:
-		attr = getattr(modelObject, munger)
-		attr(value)
-		return
-	except:
-		pass
-
-	# Is munger is the name of an attribute or property on modelObject?
-	try:
-		if (hasattr(modelObject, munger)):
-			setattr(modelObject, munger, value)
-	except:
-		pass
-
-def _Munge(modelObject, munger, extraArgs = [], returnMunger_onFail = False):
-	"""
-	Wrest some value from the given modelObject using the munger.
-	With a description like that, you know this method is going to be obscure :-)
-
-	'munger' can be:
-
-	1) a callable.
-	   This method will return the result of executing 'munger' with 'modelObject' as its parameter.
-
-	2) the name of an attribute of the modelObject.
-	   If that attribute is callable, this method will return the result of executing that attribute.
-	   Otherwise, this method will return the value of that attribute.
-
-	3) an index (string or integer) onto the modelObject.
-	   This allows dictionary-like objects and list-like objects to be used directly.
-	"""
-	if (munger is None):
-		return None
-
-	# THINK: The following code treats an instance variable with the value of None
-	# as if it doesn't exist. Is that best?
-
-	# Try attribute access
-	try:
-		attr = getattr(modelObject, munger, None)
-		if (attr is not None):
-			try:
-				return attr()
-			except TypeError:
-				return attr
-	except TypeError:
-		# Happens when munger is not a string
-		pass
-
-	# Use the callable directly, if possible.
-	# Try/except can mask errors from the user's callable function
-	if (callable(munger)):
-		if (extraArgs):
-			try:
-				return munger(modelObject, *extraArgs)
-			except TypeError:
-				pass
-
-		#Allow the error to propigate if one occurs
-		return munger(modelObject)
-
-	# Try dictionary-like indexing
-	try:
-		return modelObject[munger]
-	except:
-		pass
-
-	if (returnMunger_onFail):
-		return munger
-	else:
-		return None
-
-def _window_to_bitmap(window):
-	"""
-	Makes a bmp of what a wxWindow looks like.
-	Code from FogleBird on https://stackoverflow.com/questions/4773961/get-a-widgets-dc-in-wxpython
-	"""
-	width, height = window.GetSize()
-	bitmap = wx.EmptyBitmap(width, height)
-	wdc = wx.WindowDC(window)
-	mdc = wx.MemoryDC(bitmap)
-	mdc.Blit(0, 0, width, height, wdc, 0, 0)
-	return bitmap
-
-def _drawText(dc, rectangle = wx.Rect(0, 0, 100, 100), text = "", isSelected = False, isEnabled = True, 
-	x_offset = 0, y_offset = 0, x_align = None, y_align = None, color = None, font = None, wrap = False):
-	"""Draw a simple text label in appropriate colors.
-	Special thanks to Milan Skala for how to center text on http://wxpython-users.1045709.n5.nabble.com/Draw-text-over-an-existing-bitmap-td5725527.html
-
-	x_align (str) - Where the text should be aligned in the cell
-		~ "left", "right", "center"
-		- If None: No alignment will be done
-
-	y_align (str) - Where the button should be aligned with respect to the x-axis in the cell
-		~ "top", "bottom", "center"
-		- If None: Will use "center"
-
-	Example Input: _drawText(dc, rectangle, text, isSelected)
-	Example Input: _drawText(dc, rectangle, text, isSelected, x_align = "left", color = textColor)
-	"""
-
-	oldColor = dc.GetTextForeground()
-	oldFont = dc.GetFont()
-	try:
-		if (color is not None):
-			color = tuple(min(255, max(0, item)) for item in color) #Ensure numbers are between 0 and 255
-		else:
-			if (not isEnabled):
-				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT)
-			elif (isSelected):
-				#Use: https://wxpython.org/Phoenix/docs/html/wx.SystemColour.enumeration.html
-				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHTTEXT)
-			else:
-				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNTEXT)
-		dc.SetTextForeground(color)
-
-		if (font is not None):
-			dc.SetFont(font)
-
-		if (wrap):
-			text = wx.lib.wordwrap.wordwrap(text, rectangle.width, dc)
-
-		if (x_align is None):
-			x_align = 0
-		else:
-			x_align = {"l": wx.ALIGN_LEFT, "r": wx.ALIGN_RIGHT, "c": wx.ALIGN_CENTER_HORIZONTAL}[x_align[0].lower()]
-
-		if (y_align is None):
-			y_align = wx.ALIGN_CENTER_VERTICAL
-		else:
-			y_align = {"t": wx.ALIGN_TOP, "b": wx.ALIGN_BOTTOM, "c": wx.ALIGN_CENTER_VERTICAL}[y_align[0].lower()]
-
-		dc.DrawLabel(text, (rectangle[0] + x_offset, rectangle[1] + y_offset, rectangle[2], rectangle[3]), alignment = x_align|y_align)
-	finally:
-		dc.SetFont(oldFont)
-		dc.SetTextForeground(oldColor)
-
-def _drawBackground(dc, rectangle, isSelected, color = None):
-	"""Draw an appropriate background based on selection state.
-
-	Example Input: _drawBackground(dc, rectangle, isSelected)
-	Example Input: _drawBackground(dc, rectangle, isSelected, color = cellColor)"""
-
-	oldPen = dc.GetPen()
-	oldBrush = dc.GetBrush()
-
-	try:
-		if (color is not None):
-			color = tuple(min(255, max(0, item)) for item in color) #Ensure numbers are between 0 and 255
-		else:
-			if (isSelected):
-				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHT)
-			else:
-				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
-		dc.SetBrush(wx.Brush(color, style = wx.SOLID))
-	
-		dc.SetPen(wx.TRANSPARENT_PEN)
-		dc.DrawRectangle(rectangle.x, rectangle.y, rectangle.width, rectangle.height)
-	finally:
-		dc.SetPen(oldPen)
-		dc.SetBrush(oldBrush)
-
-def _drawButton(dc, rectangle, isSelected, fitTo = None, radius = 1, borderWidth = 1,
-	x_offset = 0, y_offset = 0, width_offset = 0, height_offset = 0,
-	x_align = None, y_align = None, color = None, borderColor = None):
-	"""Draw a button in appropriate colors.
-	If both 'x_align' and 'y_align' are None, no alignment will be done
-
-	fitTo (str)   - Determines the initial width and height of the button
-		- If str: Will use the size of the text if it were drawn
-		- If None: Will use 'rectangle'
-
-	x_align (str) - Where the button should be aligned with respect to the x-axis in the cell
-		~ "left", "right", "center"
-		- If None: Will use "center"
-
-	y_align (str) - Where the button should be aligned with respect to the x-axis in the cell
-		~ "top", "bottom", "center"
-		- If None: Will use "center"
-
-	Example Input: _drawButton(dc, rectangle, isSelected)
-	Example Input: _drawButton(dc, rectangle, isSelected, x_align = "right", y_align = "top")
-	Example Input: _drawButton(dc, rectangle, isSelected, x_align = "center", y_align = "center", width_offset = -10, height_offset = -10)
-	Example Input: _drawButton(dc, rectangle, isSelected, fitTo = "Lorem Ipsum", width_offset = 6)
-	"""
-
-	oldPen = dc.GetPen()
-	oldBrush = dc.GetBrush()
-
-	try:
-		if (color is not None):
-			color = tuple(min(255, max(0, item)) for item in color) #Ensure numbers are between 0 and 255
-		else:
-			if (isSelected):
-				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNHIGHLIGHT)
-			else:
-				color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE)
-		dc.SetBrush(wx.Brush(color, style = wx.SOLID))
-
-		if (borderColor is not None):
-			borderColor = tuple(min(255, max(0, item)) for item in borderColor) #Ensure numbers are between 0 and 255
-		else:
-			borderColor = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNSHADOW)
-		dc.SetPen(wx.Pen(borderColor, width = borderWidth, style = wx.SOLID))
-		# dc.SetPen(wx.TRANSPARENT_PEN)
-
-		if (fitTo is None):
-			width = rectangle.width
-			height = rectangle.height
-		else:
-			width, height = dc.GetTextExtent(fitTo)
-
-		if ((x_align is None) and (y_align is None)):
-			x_align = 0
-			y_align = 0
-		else:
-			if (x_align is None):
-				x_align = "center"
-			elif (y_align is None):
-				y_align = "center"
-
-			if (x_align.lower()[0] == "l"):
-				x_align = 0
-			elif (x_align.lower()[0] == "r"):
-				x_align = rectangle.width - (width + width_offset)
-			else:
-				x_align = (rectangle.width - (width + width_offset)) / 2
-
-			if (y_align.lower()[0] == "t"):
-				y_align = 0
-			elif (y_align.lower()[0] == "b"):
-				y_align = rectangle.height - (height + height_offset)
-			else:
-				y_align = (rectangle.height - (height + height_offset)) / 2
-
-		dc.DrawRoundedRectangle(rectangle.x + x_align + x_offset, rectangle.y + y_align + y_offset, width + width_offset, height + height_offset, radius)
-	finally:
-		dc.SetPen(oldPen)
-		dc.SetBrush(oldBrush)
-		
-def _clip(dc, rectangle):
-	"""Setup the clipping rectangle"""
-	
-	dc.SetClippingRegion(rectangle.x, rectangle.y, rectangle.width, rectangle.height)
-
-def _unclip(dc):
-	"""Destroy the clipping rectangle"""
-	
-	dc.DestroyClippingRegion()
+_drawText = MyUtilities.wxPython._drawText
+_drawBackground = MyUtilities.wxPython._drawBackground
+_drawButton = MyUtilities.wxPython._drawButton
 
 #Models
 #https://github.com/wxWidgets/Phoenix/blob/master/samples/dataview/DataViewModel.py
@@ -3674,7 +3342,7 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				self.rootLength = 0
 				for group in self.olv.groups:
 					rowList = applyRowFilter(group.modelObjects)
-					if ((not rowList) and ((not _Munge(group, self.olv.showEmptyGroups, returnMunger_onFail = True)) or (group.key not in self.olv.emptyGroups))):
+					if ((not rowList) and ((not _Munge(self.olv.showEmptyGroups, source = group, returnMunger_onFail = True)) or (group.key not in self.olv.emptyGroups))):
 						continue
 
 					self.rootLength += 1
@@ -3816,18 +3484,23 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 
 		if (isinstance(node, DataListGroup)):
 			if (isinstance(defn.renderer, (Renderer_Text, Renderer_Choice))):
-				return (node.title, node.title)
+				return (node.title, node.title, None)
 			return node.title
 
 		if (alternateGetter):
-			value = _Munge(node, alternateGetter, extraArgs = [defn])
+			value = _Munge(alternateGetter, source = node, extraArgs = [defn])
 		else:
-			value = _Munge(node, defn.valueGetter, extraArgs = [defn])
+			value = _Munge(defn.valueGetter, source = node, extraArgs = [defn])
 
 		if (raw):
 			return value
 
-		if (isinstance(defn.renderer, (Renderer_Text, Renderer_Choice))):
+		if (isinstance(defn.renderer, Renderer_Text)):
+			#Account for formatter and icon
+			icon = _Munge(defn.renderer.icon, source = node, extraArgs = [defn], returnMunger_onFail = True)
+			return (value, _StringToValue(value, defn.stringConverter, extraArgs = [defn]), icon)
+
+		if (isinstance(defn.renderer, Renderer_Choice)):
 			#Account for formatter
 			return (value, _StringToValue(value, defn.stringConverter, extraArgs = [defn]))
 		
@@ -3842,15 +3515,21 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 				return 0
 		
 		elif (isinstance(defn.renderer, (wx.dataview.DataViewIconTextRenderer, Renderer_Icon))):
-			icon = _Munge(node, defn.renderer.icon, extraArgs = [defn], returnMunger_onFail = True)
+			icon = _Munge(defn.renderer.icon, source = node, extraArgs = [defn], returnMunger_onFail = True)
 			if (icon is None):
 				icon = wx.Icon(wx.NullBitmap)
 			if (value is None):
 				value = ""
+
+			print("@GetValue", defn.valueGetter, defn.renderer)
+
+			#Account for formatter
+			if (isinstance(defn.renderer, Renderer_Icon)):
+				return (value, _StringToValue(value, defn.stringConverter, extraArgs = [defn]), icon)
 			return wx.dataview.DataViewIconText(text = str(value), icon = icon)
 
 		elif (isinstance(defn.renderer, Renderer_MultiImage)):
-			image = _Munge(node, defn.renderer.image, extraArgs = [defn], returnMunger_onFail = True)
+			image = _Munge(defn.renderer.image, source = node, extraArgs = [defn], returnMunger_onFail = True)
 			if (isinstance(image, (list, tuple, set, types.GeneratorType))):
 				return image
 			else:
@@ -4173,6 +3852,14 @@ class NormalListModel(wx.dataview.PyDataViewModel):
 		return super().IsVirtualListModel()
 
 #Renderers
+_ellipsizeCatalogue = {
+	None: wx.ELLIPSIZE_NONE, 
+	False: wx.ELLIPSIZE_NONE, 
+	True: wx.ELLIPSIZE_MIDDLE,
+	"start": wx.ELLIPSIZE_START, 
+	"middle": wx.ELLIPSIZE_MIDDLE, 
+	"end": wx.ELLIPSIZE_END,
+}
 class Renderer_MultiImage(wx.dataview.DataViewCustomRenderer):
 	"""
 	Places multiple images next to each other.
@@ -4213,7 +3900,10 @@ class Renderer_MultiImage(wx.dataview.DataViewCustomRenderer):
 		x, y, width, height = rect
 		totalWidth = 0
 		for image in self.value:
-			dc.DrawBitmap(image, x + totalWidth, y)
+			try:
+				dc.DrawBitmap(image, x + totalWidth, y)
+			except TypeError:
+				dc.DrawIcon(image, x + totalWidth, y)
 			totalWidth += image.GetWidth()
 		return True
 
@@ -4268,11 +3958,12 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		return super().__self_class__(**instructions)
 
 	def SetEllipsize(self, ellipsize = None):
+		global _ellipsizeCatalogue
+
 		self.ellipsize = ellipsize
 		self.buildingKwargs["ellipsize"] = ellipsize
 
-		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_MIDDLE,
-			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
+		self.EnableEllipsize(_ellipsizeCatalogue.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def SetValue_both(self, value):
 		self._node = value[0]
@@ -4281,7 +3972,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self._applyFunction(value[2][1])
 
 		if (self.enabled is not None):
-			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
+			self._enabled = _Munge(self.enabled, source = self._node, returnMunger_onFail = True)
 		else:
 			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
 		return True
@@ -4290,10 +3981,10 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 		self._node = value[0]
 		self._column = value[1]
 		self._applyFunction(value[2])
-		self._text = _Munge(self._node, self.text, returnMunger_onFail = True)
+		self._text = _Munge(self.text, source = self._node, returnMunger_onFail = True)
 
 		if (self.enabled is not None):
-			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
+			self._enabled = _Munge(self.enabled, source = self._node, returnMunger_onFail = True)
 		else:
 			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
 		return True
@@ -4301,11 +3992,11 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 	def SetValue_text(self, value):
 		self._node = value[0]
 		self._column = value[1]
-		self._applyFunction(_Munge(self._node, self.function, returnMunger_onFail = True))
+		self._applyFunction(_Munge(self.function, source = self._node, returnMunger_onFail = True))
 		self._text = value[2]
 
 		if (self.enabled is not None):
-			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
+			self._enabled = _Munge(self.enabled, source = self._node, returnMunger_onFail = True)
 		else:
 			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
 		return True
@@ -4313,12 +4004,12 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 	def SetValue(self, value):
 		self._node = value[0]
 		self._column = value[1]
-		self._applyFunction(_Munge(self._node, self.function, returnMunger_onFail = True))
-		self._text = _Munge(self._node, self.text, returnMunger_onFail = True)
+		self._applyFunction(_Munge(self.function, source = self._node, returnMunger_onFail = True))
+		self._text = _Munge(self.text, source = self._node, returnMunger_onFail = True)
 		self.extraArg = value[2]
 
 		if (self.enabled is not None):
-			self._enabled = _Munge(self._node, self.enabled, returnMunger_onFail = True)
+			self._enabled = _Munge(self.enabled, source = self._node, returnMunger_onFail = True)
 		else:
 			self._enabled = self.GetMode() == rendererCatalogue[self.type]["edit"]
 		return True
@@ -4338,7 +4029,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 	def Render(self, rectangle, dc, state):
 
 		isSelected = state == wx.dataview.DATAVIEW_CELL_SELECTED
-		useNativeRenderer = _Munge(self._node, self.useNativeRenderer, returnMunger_onFail = True)
+		useNativeRenderer = _Munge(self.useNativeRenderer, source = self._node, returnMunger_onFail = True)
 		if (useNativeRenderer):
 			#Use: https://github.com/wxWidgets/wxPython/blob/master/demo/RendererNative.py
 
@@ -4358,8 +4049,7 @@ class Renderer_Button(wx.dataview.DataViewCustomRenderer):
 			rectangle.Deflate(2, 0)
 
 		if (self._text):
-			_drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, x_align = "left")
-			# _drawText(dc, rectangle, self._text, False, isEnabled = self._enabled, x_align = "center" if (useNativeRenderer is not None) else "left")
+			_drawText(dc, text = self._text, align = rectangle, isSelected = False, isEnabled = self._enabled, x_align = "left") #x_align = "center" if (useNativeRenderer is not None) else "left")
 		return True
 
 	def LeftClick(self, clickPos, cellRect, model, item, columnIndex):
@@ -4415,11 +4105,12 @@ class Renderer_File(wx.dataview.DataViewCustomRenderer):
 		return super().__self_class__(**instructions)
 
 	def SetEllipsize(self, ellipsize = None):
+		global _ellipsizeCatalogue
+
 		self.ellipsize = ellipsize
 		self.buildingKwargs["ellipsize"] = ellipsize
 
-		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_MIDDLE,
-			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
+		self.EnableEllipsize(_ellipsizeCatalogue.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def SetValue(self, value):
 		if ((not self.single) and (not isinstance(value, (list, tuple)))):
@@ -4441,7 +4132,7 @@ class Renderer_File(wx.dataview.DataViewCustomRenderer):
 		else:
 			value = self.value
 
-		_drawText(dc, rectangle, value, isSelected, x_align = "left")
+		_drawText(dc, text = value, align = rectangle, isSelected = isSelected, x_align = "left")
 		return True
 
 	def HasEditorCtrl(self):
@@ -4668,23 +4359,22 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 		return (-1, -1)
 
 	def Render(self, rectangle, dc, state):
-
-		pen = _Munge(self, self.pen, returnMunger_onFail = True)
+		pen = _Munge(self.pen, source = self, returnMunger_onFail = True)
 		if (pen is None):
 			pen = wx.Pen(wx.BLACK, 1)
 
-		brush = _Munge(self, self.brush, returnMunger_onFail = True)
+		brush = _Munge(self.brush, source = self, returnMunger_onFail = True)
 		if (brush is None):
-			color = _Munge(self, self.color, returnMunger_onFail = True)
+			color = _Munge(self.color, source = self, returnMunger_onFail = True)
 			if (color is None):
 				color = wx.BLUE
 			brush = wx.Brush(color)
 
-		minimum = _Munge(self, self.minimum, returnMunger_onFail = True)
+		minimum = _Munge(self.minimum, source = self, returnMunger_onFail = True)
 		if (minimum is None):
 			minimum = 0
 
-		maximum = _Munge(self, self.maximum, returnMunger_onFail = True)
+		maximum = _Munge(self.maximum, source = self, returnMunger_onFail = True)
 		if (maximum is None):
 			maximum = 100
 
@@ -4705,8 +4395,7 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 		return True
 
 	def CreateEditorCtrl(self, parent, labelRect, value):
-
-		editor = _Munge(self, self.editor, returnMunger_onFail = True)
+		editor = _Munge(self.editor, source = self, returnMunger_onFail = True)
 		try:
 			if (editor.lower() == "text"):
 				ctrl = wx.TextCtrl(parent, value = str(value), pos = labelRect.Position, size = labelRect.Size)
@@ -4714,11 +4403,11 @@ class Renderer_Progress(wx.dataview.DataViewCustomRenderer):
 				ctrl.SelectAll()
 
 			else:
-				minimum = _Munge(self, self.minimum, returnMunger_onFail = True)
+				minimum = _Munge(self.minimum, source = self, returnMunger_onFail = True)
 				if (minimum is None):
 					minimum = 0
 
-				maximum = _Munge(self, self.maximum, returnMunger_onFail = True)
+				maximum = _Munge(self.maximum, source = self, returnMunger_onFail = True)
 				if (maximum is None):
 					maximum = 100
 
@@ -4793,19 +4482,20 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 		self.buildingKwargs["default"] = default
 
 	def SetEllipsize(self, ellipsize = None):
+		global _ellipsizeCatalogue
+		
 		self.ellipsize = ellipsize
 		self.buildingKwargs["ellipsize"] = ellipsize
 
-		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_MIDDLE,
-			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
+		self.EnableEllipsize(_ellipsizeCatalogue.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def CreateEditorCtrl(self, parent, labelRect, value):
 		if (callable(self.choices)):
-			choices = _Munge(value[0], self.choices, extraArgs = [value[1]], returnMunger_onFail = True)
+			choices = _Munge(self.choices, source = value[0], extraArgs = [value[1]], returnMunger_onFail = True)
 		else:
 			choices = self.choices
 
-		default = _Munge(value[0], self.default, extraArgs = [value[1]], returnMunger_onFail = True)
+		default = _Munge(self.default, source = value[0], extraArgs = [value[1]], returnMunger_onFail = True)
 		if (default is None):
 			default = value[1]
 
@@ -4820,26 +4510,71 @@ class Renderer_Choice(wx.dataview.DataViewChoiceRenderer):
 
 		return window
 
-class Renderer_Text(wx.dataview.DataViewTextRenderer):
+class Renderer_Icon(wx.dataview.DataViewIconTextRenderer):
+	"""
+	Depending on what *icon* is initially will determine how 
+	the value returned by by *valueGetter* for the assigned *ColumnDefn* is used.
+	*icon* should be a wxBitmap or function that returns a wxBitmap; if it is None,
+	then no icon will be drawn.
+	"""
+
+	def __init__(self, icon = None, editor = None, editRaw = True, ellipsize = True, **kwargs):
+
+		wx.dataview.DataViewIconTextRenderer.__init__(self, **kwargs)
+		self.type = "icon"
+		self.buildingKwargs = {**kwargs}
+
+		self.SetIcon(icon)
+		self.SetEditor(editor)
+		self.SetEditRaw(editRaw)
+		self.SetEllipsize(ellipsize)
+
+	def SetIcon(self, icon = None):
+		self.icon = icon
+		self.buildingKwargs["icon"] = icon
+
+	def Clone(self, **kwargs):
+		#Any keywords in kwargs will override keywords in buildingKwargs
+		instructions = {**self.buildingKwargs, **kwargs}
+		return super().__self_class__(**instructions)
+
+	def SetEllipsize(self, ellipsize = None):
+		global _ellipsizeCatalogue
+		
+		self.ellipsize = ellipsize
+		self.buildingKwargs["ellipsize"] = ellipsize
+
+		self.EnableEllipsize(_ellipsizeCatalogue.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
+
+class Renderer_Text(wx.dataview.DataViewCustomRenderer, MyUtilities.common.EnsureFunctions):
 	"""
 	If *editRaw* == True: Edit the un-formatted value
 	If *editRaw* == False: Edit the formatted value
 
 	If *autoComplete* is a list: Will use the given list to auto-complete things the user types
+
+	Depending on what *icon* is initially will determine how 
+	the value returned by by *valueGetter* for the assigned *ColumnDefn* is used.
+	*icon* should be a wxIcon or function that returns a wxIcon; if it is None,
+	then no icon will be drawn.
 	"""
 
-	def __init__(self, editor = None, password = False, ellipsize = True, editRaw = True, autoComplete = None, caseSensitive = False, alwaysShow = False, **kwargs):
+	def __init__(self, icon = None, iconSize = None, password = False, ellipsize = True, editRaw = True, 
+		autoComplete = None, caseSensitive = False, alwaysShow = False, editor = None, **kwargs):
 
-		wx.dataview.DataViewTextRenderer.__init__(self, **kwargs)
+		wx.dataview.DataViewCustomRenderer.__init__(self, **kwargs)
 		self.type = "text"
-		self.buildingKwargs = {**kwargs, "password": password}
+		self.buildingKwargs = {**kwargs}
 
+		self.value = None
 		self.patch_edit = False
 
-		self.password = password
+		self.SetIcon(icon)
+		self.SetIconSize(iconSize)
 		self.SetEditor(editor)
 		self.SetEditRaw(editRaw)
-		self.SetEllipsize(ellipsize)
+		self.SetPassword(password)
+		# self.SetEllipsize(ellipsize)
 		self.SetAlwaysShow(alwaysShow)
 		self.SetAutoComplete(autoComplete)
 		self.SetCaseSensitive(caseSensitive)
@@ -4849,12 +4584,17 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
 
-	def SetEllipsize(self, ellipsize = None):
-		self.ellipsize = ellipsize
-		self.buildingKwargs["ellipsize"] = ellipsize
+	# def SetEllipsize(self, ellipsize = None):
+	# 	global _ellipsizeCatalogue
+		
+	# 	self.ellipsize = ellipsize
+	# 	self.buildingKwargs["ellipsize"] = ellipsize
 
-		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_END,
-			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
+	# 	self.EnableEllipsize(_ellipsizeCatalogue.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
+
+	def SetIcon(self, icon = None):
+		self.icon = icon
+		self.buildingKwargs["icon"] = icon
 
 	def SetEditor(self, editor = None):
 		self.editor = editor
@@ -4863,6 +4603,14 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 	def SetEditRaw(self, editRaw = None):
 		self.editRaw = editRaw
 		self.buildingKwargs["editRaw"] = editRaw
+
+	def SetIconSize(self, iconSize = None):
+		self.iconSize = iconSize or (16, 16)
+		self.buildingKwargs["iconSize"] = iconSize
+
+	def SetPassword(self, password = None):
+		self.password = password
+		self.buildingKwargs["password"] = password
 
 	def SetAlwaysShow(self, alwaysShow = None):
 		self.alwaysShow = alwaysShow
@@ -4876,10 +4624,12 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 		self.caseSensitive = caseSensitive
 		self.buildingKwargs["caseSensitive"] = caseSensitive
 
+	def GetValue(self):
+		return self.value
+
 	def SetValue(self, value):
-		if (value[1] is None):
-			return super().SetValue("")
-		return super().SetValue(value[1])
+		self.value = value
+		return True
 
 	def FinishEditing(self, ctrl = None, fromEvent = False):
 		ctrl = ctrl or self.GetEditorCtrl()
@@ -4919,38 +4669,62 @@ class Renderer_Text(wx.dataview.DataViewTextRenderer):
 	def HasEditorCtrl(self):
 		return True
 
-	def CreateEditorCtrl(self, parent, labelRect, value):
+	def CreateEditorCtrl(self, parent, rectangle, value):
 		self.patch_edit = False
-		editor = _Munge(self, self.editor, returnMunger_onFail = True)
+		editor = _Munge(self.editor, source = self, returnMunger_onFail = True)
 		if (editor):
 			return editor
 
-		if (self.password):
-			style = wx.TE_PASSWORD
-		else:
-			style = 0
+		editRaw = _Munge(self.editRaw, source = self, returnMunger_onFail = True)
+		_value = self.ensure_string(value[not editRaw])
 
-		editRaw = _Munge(self, self.editRaw, returnMunger_onFail = True)
-		_value = value[not editRaw]
-		_value = (f"{_value}", "")[_value is None]
+		x, y, width, height = rectangle
+		icon = value[2]
+		if (icon is not None):
+			for image in self.ensure_container(icon):
+				width -= image.GetWidth() 
 
-		autoComplete = _Munge(self, self.autoComplete, returnMunger_onFail = True)
+		style = (0, wx.TE_PASSWORD)[self.password]
+		autoComplete = _Munge(self.autoComplete, source = self, returnMunger_onFail = True)
 		if (autoComplete):
-			alwaysShow = _Munge(self, self.alwaysShow, returnMunger_onFail = True)
-			caseSensitive = _Munge(self, self.caseSensitive, returnMunger_onFail = True)
+			alwaysShow = _Munge(self.alwaysShow, source = self, returnMunger_onFail = True)
+			caseSensitive = _Munge(self.caseSensitive, source = self, returnMunger_onFail = True)
 			ctrl = AutocompleteTextCtrl(parent, completer = autoComplete, caseSensitive = caseSensitive, alwaysShow = alwaysShow, 
-				value = _value, pos = labelRect.Position, size = labelRect.Size, style = style)
+				value = _value, pos = (x, y), size = (width, height), style = style)
 
 			ctrl.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
 			ctrl.Bind(wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnSelectOther)
 		else:
-			ctrl = wx.TextCtrl(parent, value = _value, pos = labelRect.Position, size = labelRect.Size, style = style)
+			ctrl = wx.TextCtrl(parent, value = _value, pos = (x, y), size = (width, height), style = style)
 		ctrl.SetInsertionPointEnd()
 		ctrl.SelectAll()
 
 		self._editorCtrl = ctrl
 
 		return ctrl
+
+	def GetValueFromEditorCtrl(self, editor):
+		return editor.GetValue()
+
+	def GetSize(self):
+		return (-1, -1)
+
+	def Render(self, rectangle, dc, state):
+		x, y, width, height = rectangle
+		totalWidth = 0
+
+		for image in self.ensure_container(self.value[2]):
+			try:
+				dc.DrawIcon(image, x + totalWidth, y)
+			except TypeError:
+				dc.DrawBitmap(image, x + totalWidth, y)
+			totalWidth += image.GetWidth()
+		if (totalWidth >= width):
+			return True
+
+		_drawText(dc, text = self.value[1], align = wx.Rect(x + totalWidth, y, width - totalWidth, height), x_align = "left")
+
+		return True
 
 class Renderer_Spin(wx.dataview.DataViewSpinRenderer):
 	"""
@@ -4974,11 +4748,12 @@ class Renderer_Spin(wx.dataview.DataViewSpinRenderer):
 		return super().__self_class__(**instructions)
 
 	def SetEllipsize(self, ellipsize = None):
+		global _ellipsizeCatalogue
+		
 		self.ellipsize = ellipsize
 		self.buildingKwargs["ellipsize"] = ellipsize
 
-		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_MIDDLE,
-			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
+		self.EnableEllipsize(_ellipsizeCatalogue.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 	def SetEditor(self, editor = None):
 		self.editor = editor
@@ -5001,21 +4776,21 @@ class Renderer_Spin(wx.dataview.DataViewSpinRenderer):
 
 	def CreateEditorCtrl(self, parent, labelRect, value):
 
-		editor = _Munge(self, self.editor, returnMunger_onFail = True)
+		editor = _Munge(self.editor, source = self, returnMunger_onFail = True)
 		if (editor):
 			return editor
 
-		minimum = _Munge(self, self.minimum, returnMunger_onFail = True)
+		minimum = _Munge(self.minimum, source = self, returnMunger_onFail = True)
 		if (minimum is None):
 			minimum = -999_999_999
 
-		maximum = _Munge(self, self.maximum, returnMunger_onFail = True)
+		maximum = _Munge(self.maximum, source = self, returnMunger_onFail = True)
 		if (maximum is None):
 			maximum = 999_999_999
 
 		ctrl = wx.SpinCtrl(parent, pos = labelRect.Position, size = labelRect.Size, min = minimum, max = maximum, initial = value)
 
-		base = _Munge(self, self.base, returnMunger_onFail = True)
+		base = _Munge(self.base, source = self, returnMunger_onFail = True)
 		if ((base is not None) and (base != 10)):
 			ctrl.SetBase(base)
 		return ctrl
@@ -5034,39 +4809,6 @@ class Renderer_Bmp(wx.dataview.DataViewBitmapRenderer):
 		#Any keywords in kwargs will override keywords in buildingKwargs
 		instructions = {**self.buildingKwargs, **kwargs}
 		return super().__self_class__(**instructions)
-
-class Renderer_Icon(wx.dataview.DataViewIconTextRenderer):
-	"""
-	Depending on what *icon* is initially will determine how 
-	the value returned by by *valueGetter* for the assigned *ColumnDefn* is used.
-	*icon* should be a wxBitmap or function that returns a wxBitmap; if it is None,
-	then no icon will be drawn.
-	"""
-
-	def __init__(self, icon = None, ellipsize = True, **kwargs):
-
-		wx.dataview.DataViewIconTextRenderer.__init__(self, **kwargs)
-		self.type = "icon"
-		self.buildingKwargs = {**kwargs}
-
-		self.SetEllipsize(ellipsize)
-		self.SetIcon(icon)
-
-	def SetIcon(self, icon = None):
-		self.icon = icon
-		self.buildingKwargs["icon"] = icon
-
-	def Clone(self, **kwargs):
-		#Any keywords in kwargs will override keywords in buildingKwargs
-		instructions = {**self.buildingKwargs, **kwargs}
-		return super().__self_class__(**instructions)
-
-	def SetEllipsize(self, ellipsize = None):
-		self.ellipsize = ellipsize
-		self.buildingKwargs["ellipsize"] = ellipsize
-
-		self.EnableEllipsize({None: wx.ELLIPSIZE_NONE, False: wx.ELLIPSIZE_NONE, True: wx.ELLIPSIZE_MIDDLE,
-			"start": wx.ELLIPSIZE_START, "middle": wx.ELLIPSIZE_MIDDLE, "end": wx.ELLIPSIZE_END}.get(ellipsize, wx.ELLIPSIZE_MIDDLE))
 
 rendererCatalogue = {
 	None:        {"edit": wx.dataview.DATAVIEW_CELL_EDITABLE, 		"nonEdit": wx.dataview.DATAVIEW_CELL_ACTIVATABLE, 	"class": Renderer_Text},
