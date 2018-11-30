@@ -4722,7 +4722,7 @@ class Renderer_Text(wx.dataview.DataViewCustomRenderer, MyUtilities.common.Ensur
 		if (totalWidth >= width):
 			return True
 
-		_drawText(dc, text = self.value[1], align = wx.Rect(x + totalWidth, y, width - totalWidth, height), x_align = "left")
+		_drawText(dc, text = self.value[1], isSelected = state == wx.dataview.DATAVIEW_CELL_SELECTED, align = wx.Rect(x + totalWidth, y, width - totalWidth, height), x_align = "left")
 
 		return True
 
