@@ -14,7 +14,7 @@ import wx.dataview
 import wx.lib.wordwrap
 
 from . import DOLVEvent
-import Utilities as MyUtilities
+import MyUtilities.wxPython
 AutocompleteTextCtrl = MyUtilities.wxPython.AutocompleteTextCtrl
 
 #----------------------------------------------------------------------------
